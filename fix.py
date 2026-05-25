@@ -1,4 +1,4 @@
-import requests
+code = """import requests
 import os
 from datetime import datetime, timedelta
 from config import BITRIX_WEBHOOK_URL
@@ -68,3 +68,8 @@ def create_meeting(title, date, time, duration_minutes):
     if "error" in data:
         return {"success": False, "error": data["error"]}
     return {"success": True, "event_id": data.get("result")}
+"""
+
+with open("bitrix.py", "w", encoding="utf-8") as f:
+    f.write(code)
+print("OK — bitrix.py создан!")

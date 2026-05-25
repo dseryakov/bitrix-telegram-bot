@@ -5,6 +5,13 @@ Telegram-бот для работы с Битрикс24
 /calendar   — встречи на сегодня и неделю
 /add_meeting — создать встречу
 """
+import os
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
+os.environ.pop("ALL_PROXY", None)
+os.environ.pop("http_proxy", None)
+os.environ.pop("https_proxy", None)
+os.environ.pop("all_proxy", None)
 
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -120,9 +127,14 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = "\n".join(lines)
     if len(text) > 4000:
-        text = text[:4000] + "\n\n_...список обрезан_"
+        # Обрезаем аккуратно чтобы не сломать Markdown
+        text = text[:3900] + "\n\n_...показаны первые задачи_"
 
-    await query.edit_message_text(text, parse_mode="Markdown")
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown")
+    except Exception:
+        # Если Markdown сломан — отправляем без форматирования
+        await query.edit_message_text(text.replace("*", "").replace("_", ""))
 
 
 async def calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -229,7 +241,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Запуск ───────────────────────────────────────────────────────────────────
 
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    import httpx
+    from telegram.request import HTTPXRequest
+    request = HTTPXRequest(proxy=None)
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request).build()
 
     meeting_handler = ConversationHandler(
         entry_points=[CommandHandler("add_meeting", add_meeting_start)],
