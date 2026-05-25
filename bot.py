@@ -1,10 +1,9 @@
 """
 Telegram-бот для работы с Битрикс24
-Команды:
-  /start      — приветствие
-  /tasks      — список задач по группам (WEB / 1С / ПРОИЗВОДСТВО / Все)
-  /calendar   — встречи на сегодня и неделю
-  /add_meeting — создать встречу в календаре
+/start      — приветствие
+/tasks      — задачи по группам → важные / важные просроченные
+/calendar   — встречи на сегодня и неделю
+/add_meeting — создать встречу
 """
 
 import logging
@@ -13,7 +12,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, filters, ContextTypes
 )
-from bitrix import get_my_tasks, get_calendar_events, create_meeting
+from bitrix import get_tasks, get_calendar_events, create_meeting
 from config import TELEGRAM_TOKEN
 
 logging.basicConfig(
@@ -28,7 +27,7 @@ STATUS_LABELS = {
     "2": "⏳ В работе",
     "3": "⏸ Ждёт контроля",
     "4": "✅ Завершена",
-    "5": "⚠️ Просрочена",
+    "5": "🔴 Просрочена",
     "6": "🔄 Отложена",
 }
 
@@ -44,33 +43,60 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать кнопки выбора группы."""
+    """Шаг 1 — выбор группы."""
     keyboard = [
         [
-            InlineKeyboardButton("🌐 WEB", callback_data="tasks_WEB"),
-            InlineKeyboardButton("💼 1С", callback_data="tasks_1С"),
+            InlineKeyboardButton("🌐 WEB", callback_data="group_WEB"),
+            InlineKeyboardButton("💼 1С", callback_data="group_1С"),
         ],
         [
-            InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="tasks_ПРОИЗВОДСТВО"),
-            InlineKeyboardButton("📋 Все", callback_data="tasks_ALL"),
+            InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="group_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("📋 Все", callback_data="group_ALL"),
         ],
     ]
     await update.message.reply_text(
-        "Выбери группу задач:", reply_markup=InlineKeyboardMarkup(keyboard)
+        "Шаг 1: Выбери группу задач:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-async def tasks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Загрузить и показать задачи выбранной группы."""
+async def group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Шаг 2 — выбор типа фильтра после выбора группы."""
     query = update.callback_query
     await query.answer()
 
-    group = query.data.replace("tasks_", "")
-    group_label = group if group != "ALL" else "все группы"
+    group = query.data.replace("group_", "")
+    context.user_data["group"] = group
 
-    await query.edit_message_text(f"⏳ Загружаю задачи ({group_label})...")
+    group_label = group if group != "ALL" else "Все группы"
 
-    result = get_my_tasks(group=group)
+    keyboard = [
+        [
+            InlineKeyboardButton("🔥 Важные", callback_data="filter_important"),
+            InlineKeyboardButton("🔴 Важные просроченные", callback_data="filter_overdue"),
+        ],
+    ]
+    await query.edit_message_text(
+        f"Группа: *{group_label}*\nШаг 2: Выбери тип задач:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Шаг 3 — загрузить и показать задачи."""
+    query = update.callback_query
+    await query.answer()
+
+    filter_type = query.data.replace("filter_", "")
+    group = context.user_data.get("group", "ALL")
+
+    group_label = group if group != "ALL" else "Все группы"
+    filter_label = "🔥 Важные" if filter_type == "important" else "🔴 Важные просроченные"
+
+    await query.edit_message_text(f"⏳ Загружаю задачи...")
+
+    result = get_tasks(group=group, filter_type=filter_type)
 
     if not result["success"]:
         await query.edit_message_text(f"❌ Ошибка: {result['error']}")
@@ -79,10 +105,12 @@ async def tasks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task_list = result["tasks"]
 
     if not task_list:
-        await query.edit_message_text(f"📭 Задач в группе «{group_label}» нет.")
+        await query.edit_message_text(
+            f"📭 Нет задач\nГруппа: {group_label} | {filter_label}"
+        )
         return
 
-    lines = [f"📋 *Задачи — {group_label} ({len(task_list)}):*\n"]
+    lines = [f"{filter_label} — *{group_label}* ({len(task_list)}):\n"]
     for t in task_list:
         status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
         title = t.get("title", "Без названия")
@@ -90,10 +118,9 @@ async def tasks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deadline_str = f"\n   ⏰ {deadline[:10]}" if deadline else ""
         lines.append(f"• *{title}*\n   {status}{deadline_str}\n")
 
-    # Telegram ограничивает сообщения до 4096 символов
     text = "\n".join(lines)
     if len(text) > 4000:
-        text = text[:4000] + "\n\n_...список обрезан, показаны первые задачи_"
+        text = text[:4000] + "\n\n_...список обрезан_"
 
     await query.edit_message_text(text, parse_mode="Markdown")
 
@@ -126,7 +153,6 @@ async def calendar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     events = result["events"]
-
     if not events:
         await query.edit_message_text(f"📭 Встреч на {period_text} нет.")
         return
@@ -153,25 +179,19 @@ async def add_meeting_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_meeting_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["title"] = update.message.text
-    await update.message.reply_text(
-        "Шаг 2/4: Введи *дату* (ДД.ММ.ГГГГ):", parse_mode="Markdown"
-    )
+    await update.message.reply_text("Шаг 2/4: Введи *дату* (ДД.ММ.ГГГГ):", parse_mode="Markdown")
     return DATE
 
 
 async def add_meeting_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["date"] = update.message.text
-    await update.message.reply_text(
-        "Шаг 3/4: Введи *время начала* (ЧЧ:ММ):", parse_mode="Markdown"
-    )
+    await update.message.reply_text("Шаг 3/4: Введи *время начала* (ЧЧ:ММ):", parse_mode="Markdown")
     return TIME
 
 
 async def add_meeting_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["time"] = update.message.text
-    await update.message.reply_text(
-        "Шаг 4/4: Введи *продолжительность* в минутах:", parse_mode="Markdown"
-    )
+    await update.message.reply_text("Шаг 4/4: Введи *продолжительность* в минутах:", parse_mode="Markdown")
     return DURATION
 
 
@@ -225,7 +245,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("tasks", tasks))
     app.add_handler(CommandHandler("calendar", calendar))
-    app.add_handler(CallbackQueryHandler(tasks_callback, pattern="^tasks_"))
+    app.add_handler(CallbackQueryHandler(group_callback, pattern="^group_"))
+    app.add_handler(CallbackQueryHandler(filter_callback, pattern="^filter_"))
     app.add_handler(CallbackQueryHandler(calendar_callback, pattern="^cal_"))
     app.add_handler(meeting_handler)
 

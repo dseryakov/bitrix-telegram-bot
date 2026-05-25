@@ -7,22 +7,18 @@
 """
 
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from config import BITRIX_WEBHOOK_URL
 
-# ID групп
 GROUPS = {
     "WEB":          [328],
     "1С":           [342],
     "ПРОИЗВОДСТВО": [527, 353],
 }
-
-# Все группы вместе
 ALL_GROUP_IDS = [328, 342, 527, 353]
 
 
 def _call(method: str, params: dict = None) -> dict:
-    """Универсальный запрос к API Битрикс24."""
     url = f"{BITRIX_WEBHOOK_URL}{method}.json"
     try:
         response = requests.post(url, json=params or {}, timeout=10)
@@ -32,21 +28,25 @@ def _call(method: str, params: dict = None) -> dict:
         return {"error": str(e)}
 
 
-def get_my_tasks(group: str = "ALL") -> dict:
+def get_tasks(group: str = "ALL", filter_type: str = "important") -> dict:
     """
-    Получить задачи по группе.
-    group: "WEB", "1С", "ПРОИЗВОДСТВО" или "ALL"
+    Получить задачи по группе и типу фильтра.
+    group: "WEB", "1С", "ПРОИЗВОДСТВО", "ALL"
+    filter_type: "important" — важные (огонёк), "overdue" — важные просроченные
     """
-    if group == "ALL":
-        group_ids = ALL_GROUP_IDS
-    else:
-        group_ids = GROUPS.get(group, ALL_GROUP_IDS)
+    group_ids = ALL_GROUP_IDS if group == "ALL" else GROUPS.get(group, ALL_GROUP_IDS)
+
+    base_filter = {
+        "GROUP_ID": group_ids,
+        "MARK": "P",  # только задачи с огоньком (важные)
+    }
+
+    if filter_type == "overdue":
+        base_filter["STATUS"] = "5"  # статус "Просрочена"
 
     data = _call("tasks.task.list", {
-        "filter": {
-            "GROUP_ID": group_ids,
-        },
-        "select": ["ID", "TITLE", "STATUS", "DEADLINE", "RESPONSIBLE_ID", "GROUP_ID", "CREATED_BY"],
+        "filter": base_filter,
+        "select": ["ID", "TITLE", "STATUS", "DEADLINE", "RESPONSIBLE_ID", "GROUP_ID", "MARK"],
         "order": {"DEADLINE": "ASC"},
         "limit": 50,
     })
@@ -55,21 +55,33 @@ def get_my_tasks(group: str = "ALL") -> dict:
         return {"success": False, "error": data["error"]}
 
     tasks = data.get("result", {}).get("tasks", [])
+
+    # Дополнительная проверка просрочки по дате (на случай если статус не обновился)
+    if filter_type == "overdue":
+        now = datetime.now()
+        filtered = []
+        for t in tasks:
+            deadline = t.get("deadline", "")
+            if deadline:
+                try:
+                    dl = datetime.strptime(deadline[:19], "%Y-%m-%dT%H:%M:%S")
+                    if dl < now:
+                        filtered.append(t)
+                except ValueError:
+                    filtered.append(t)
+            else:
+                filtered.append(t)
+        tasks = filtered
+
     return {"success": True, "tasks": tasks}
 
 
 def get_calendar_events(period: str = "today") -> dict:
-    """
-    Получить события календаря.
-    period: "today" — только сегодня, "week" — ближайшие 7 дней.
-    """
+    from datetime import timedelta
     now = datetime.now()
     date_from = now.strftime("%Y-%m-%dT00:00:00")
-
-    if period == "today":
-        date_to = now.strftime("%Y-%m-%dT23:59:59")
-    else:
-        date_to = (now + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59")
+    date_to = (now.strftime("%Y-%m-%dT23:59:59") if period == "today"
+               else (now + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59"))
 
     data = _call("calendar.event.get", {
         "type": "user",
@@ -87,11 +99,7 @@ def get_calendar_events(period: str = "today") -> dict:
 
 
 def create_meeting(title: str, date: str, time: str, duration_minutes: int) -> dict:
-    """
-    Создать встречу в календаре Битрикс24.
-    date: "ДД.ММ.ГГГГ"
-    time: "ЧЧ:ММ"
-    """
+    from datetime import timedelta
     try:
         dt_start = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
         dt_end = dt_start + timedelta(minutes=duration_minutes)
