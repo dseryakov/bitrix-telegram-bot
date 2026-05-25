@@ -1,0 +1,19 @@
+# Секретные данные — НИКОГДА не загружать на GitHub!
+.env
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Логи
+*.log
+
+# IDE
+.vscode/
+.idea/
