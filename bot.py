@@ -12,6 +12,7 @@ os.environ.pop("ALL_PROXY", None)
 os.environ.pop("http_proxy", None)
 os.environ.pop("https_proxy", None)
 os.environ.pop("all_proxy", None)
+os.environ["NO_PROXY"] = "*"
 
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -94,6 +95,7 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Шаг 3 — загрузить и показать задачи."""
     query = update.callback_query
     await query.answer()
+ 
 
     filter_type = query.data.replace("filter_", "")
     group = context.user_data.get("group", "ALL")
@@ -122,19 +124,36 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
         title = t.get("title", "Без названия")
         deadline = t.get("deadline", "")
-        deadline_str = f"\n   ⏰ {deadline[:10]}" if deadline else ""
-        lines.append(f"• *{title}*\n   {status}{deadline_str}\n")
+        deadline_str = f"\n   ⏰ Дедлайн: {deadline[:10]}" if deadline else "\n   ⏰ Дедлайн: не указан"
+        responsible_id = t.get("responsibleId", "")
+        responsible_name = t.get("responsible", {}).get("name", "Не указан") if isinstance(t.get("responsible"), dict) else "Не указан"
+        time_spent = int(t.get("timeSpentInLogs", 0) or 0)
+        hours = time_spent // 3600
+        minutes = (time_spent % 3600) // 60
+        time_str = f"\n   ⏱ Списано: {hours}ч {minutes}мин"
+        task_id = t.get("id", "")
+        task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
+        lines.append(f"• *{title}*\n   {status}\n   👤 {responsible_name}{deadline_str}{time_str}\n   [Ссылка]({task_url})\n")
 
+    # Статистика по ответственным
+    stats = {}
+    for t in task_list:
+        name = t.get("responsible", {}).get("name", "Не указан") if isinstance(t.get("responsible"), dict) else "Не указан"
+        stats[name] = stats.get(name, 0) + 1
+    
+    stats_lines = ["\n\n📊 *Задач по специалистам:*"]
+    for name, count in sorted(stats.items(), key=lambda x: -x[1]):
+        stats_lines.append(f"   👤 {name}: *{count}*")
     text = "\n".join(lines)
-    if len(text) > 4000:
-        # Обрезаем аккуратно чтобы не сломать Markdown
+    if len(text) > 3900:
         text = text[:3900] + "\n\n_...показаны первые задачи_"
+    text = text + "\n".join(stats_lines)
 
+    keyboard = [[InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="back_to_groups")]]
     try:
-        await query.edit_message_text(text, parse_mode="Markdown")
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
-        # Если Markdown сломан — отправляем без форматирования
-        await query.edit_message_text(text.replace("*", "").replace("_", ""))
+        await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,13 +258,33 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ── Запуск ───────────────────────────────────────────────────────────────────
-
+async def back_to_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [
+            InlineKeyboardButton("🌐 WEB", callback_data="group_WEB"),
+            InlineKeyboardButton("💼 1С", callback_data="group_1С"),
+        ],
+        [
+            InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="group_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("📋 Все", callback_data="group_ALL"),
+        ],
+    ]
+    await query.edit_message_text("Выбери группу задач:", reply_markup=InlineKeyboardMarkup(keyboard))
 def main():
     import httpx
     from telegram.request import HTTPXRequest
     request = HTTPXRequest(proxy=None)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request).build()
-
+    from telegram import BotCommand
+    async def set_commands(app):
+        await app.bot.set_my_commands([
+            BotCommand("tasks", "Задачи по группам"),
+            BotCommand("calendar", "Встречи"),
+            BotCommand("add_meeting", "Создать встречу"),
+        ])
+    app.post_init = set_commands
     meeting_handler = ConversationHandler(
         entry_points=[CommandHandler("add_meeting", add_meeting_start)],
         states={
@@ -262,6 +301,7 @@ def main():
     app.add_handler(CommandHandler("calendar", calendar))
     app.add_handler(CallbackQueryHandler(group_callback, pattern="^group_"))
     app.add_handler(CallbackQueryHandler(filter_callback, pattern="^filter_"))
+    app.add_handler(CallbackQueryHandler(back_to_groups, pattern="^back_to_groups$"))
     app.add_handler(CallbackQueryHandler(calendar_callback, pattern="^cal_"))
     app.add_handler(meeting_handler)
 

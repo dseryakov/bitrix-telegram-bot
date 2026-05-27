@@ -34,7 +34,7 @@ def get_tasks(group="ALL", filter_type="important"):
         f = {"GROUP_ID": group_ids, "PRIORITY": "2", "STATUS": [1, 2, 3]}
     data = _call("tasks.task.list", {
         "filter": f,
-        "select": ["ID", "TITLE", "STATUS", "DEADLINE", "GROUP_ID"],
+    "select": ["ID", "TITLE", "STATUS", "DEADLINE", "GROUP_ID", "RESPONSIBLE_ID", "TIME_SPENT_IN_LOGS", "RESPONSIBLE"],
         "order": {"DEADLINE": "ASC"},
         "limit": 50,
     })
