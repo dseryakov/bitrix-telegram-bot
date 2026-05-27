@@ -46,20 +46,18 @@ def get_last_comment(task_id: str) -> str:
     """Получить последний комментарий к задаче."""
     data = _call("task.commentitem.getlist", {
         "TASK_ID": task_id,
-        "order": {"ID": "DESC"},
-        "limit": 1,
     })
     comments = data.get("result", [])
     if not comments:
         return ""
-    last = comments[0]
+    # Берём последний комментарий
+    last = comments[-1]
     author = last.get("AUTHOR_NAME", "")
     date = last.get("POST_DATE", "")[:10]
     message = last.get("POST_MESSAGE", "")
-    # Убираем теги [USER=...]...[/USER]
     import re
     message = re.sub(r'\[USER=\d+\](.*?)\[\/USER\]', r'\1', message)
-    message = message.strip()[:100]  # обрезаем до 100 символов
+    message = message.strip()[:100]
     return f"{author} ({date}): {message}"
 
 def get_calendar_events(period="today"):
