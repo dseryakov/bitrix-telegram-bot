@@ -42,6 +42,26 @@ def get_tasks(group="ALL", filter_type="important"):
         return {"success": False, "error": data["error"]}
     return {"success": True, "tasks": data.get("result", {}).get("tasks", [])}
 
+def get_last_comment(task_id: str) -> str:
+    """Получить последний комментарий к задаче."""
+    data = _call("task.commentitem.getlist", {
+        "TASK_ID": task_id,
+        "order": {"ID": "DESC"},
+        "limit": 1,
+    })
+    comments = data.get("result", [])
+    if not comments:
+        return ""
+    last = comments[0]
+    author = last.get("AUTHOR_NAME", "")
+    date = last.get("POST_DATE", "")[:10]
+    message = last.get("POST_MESSAGE", "")
+    # Убираем теги [USER=...]...[/USER]
+    import re
+    message = re.sub(r'\[USER=\d+\](.*?)\[\/USER\]', r'\1', message)
+    message = message.strip()[:100]  # обрезаем до 100 символов
+    return f"{author} ({date}): {message}"
+
 def get_calendar_events(period="today"):
     now = datetime.now()
     date_from = now.strftime("%Y-%m-%dT00:00:00")

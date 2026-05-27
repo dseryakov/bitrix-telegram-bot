@@ -20,7 +20,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, filters, ContextTypes
 )
-from bitrix import get_tasks, get_calendar_events, create_meeting
+from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment
 from config import TELEGRAM_TOKEN
 
 logging.basicConfig(
@@ -133,7 +133,9 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         time_str = f"\n   ⏱ Списано: {hours}ч {minutes}мин"
         task_id = t.get("id", "")
         task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
-        lines.append(f"• *{title}*\n   {status}\n   👤 {responsible_name}{deadline_str}{time_str}\n   [Ссылка]({task_url})\n")
+        last_comment = get_last_comment(task_id)
+        comment_str = f"\n   💬 {last_comment}" if last_comment else ""
+        lines.append(f"• *{title}*\n   {status}\n   👤 {responsible_name}{deadline_str}{time_str}{comment_str}\n   [Ссылка]({task_url})\n")
 
     # Статистика по ответственным
     stats = {}
