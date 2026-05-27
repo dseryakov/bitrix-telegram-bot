@@ -20,7 +20,7 @@ ALL_GROUP_IDS = [328, 342, 527, 353]
 def _call(method, params=None):
     url = f"{BITRIX_WEBHOOK_URL}{method}.json"
     try:
-        r = requests.post(url, json=params or {}, timeout=15, proxies={"http": None, "https": None})
+        r = requests.post(url, json=params or {}, timeout=30, proxies={"http": None, "https": None})
         r.raise_for_status()
         return r.json()
     except requests.RequestException as e:
