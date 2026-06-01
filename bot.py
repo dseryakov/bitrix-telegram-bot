@@ -191,7 +191,7 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
         await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))
- b
+
 
 async def calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
