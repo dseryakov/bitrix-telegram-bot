@@ -17,6 +17,21 @@ GROUPS = {
 }
 ALL_GROUP_IDS = [328, 342, 527, 353]
 
+def find_user_by_email(email: str) -> dict:
+    """Найти пользователя Битрикс24 по email."""
+    data = _call("user.search", {
+        "filter": {"EMAIL": email}
+    })
+    users = data.get("result", [])
+    if not users:
+        return {"success": False, "error": "Пользователь не найден"}
+    user = users[0]
+    return {
+        "success": True,
+        "id": user["ID"],
+        "name": f"{user.get('NAME', '')} {user.get('LAST_NAME', '')}".strip()
+    }
+
 def _call(method, params=None):
     url = f"{BITRIX_WEBHOOK_URL}{method}.json"
     try:
@@ -26,7 +41,7 @@ def _call(method, params=None):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-def get_tasks(group="ALL", filter_type="important"):
+def get_tasks(group="ALL", filter_type="important", user_id="72721")::
     group_ids = ALL_GROUP_IDS if group == "ALL" else GROUPS.get(group, ALL_GROUP_IDS)
     if filter_type == "overdue":
         f = {"GROUP_ID": group_ids, "PRIORITY": "2", "STATUS": "5"}
@@ -60,25 +75,25 @@ def get_last_comment(task_id: str) -> str:
     message = message.strip()[:100]
     return f"{author} ({date}): {message}"
 
-def get_calendar_events(period="today"):
+def get_calendar_events(period="today", user_id="72721"):
     now = datetime.now()
     date_from = now.strftime("%Y-%m-%dT00:00:00")
     date_to = (now.strftime("%Y-%m-%dT23:59:59") if period == "today"
                else (now + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59"))
-    data = _call("calendar.event.get", {"type": "user", "ownerId": "me", "from": date_from, "to": date_to})
+    data = _call("calendar.event.get", {"type": "user", "ownerId": user_id, "from": date_from, "to": date_to})
     if "error" in data:
         return {"success": False, "error": data["error"]}
     events = sorted(data.get("result", []), key=lambda e: e.get("date_from", ""))
     return {"success": True, "events": events}
 
-def create_meeting(title, date, time, duration_minutes):
+def create_meeting(title, date, time, duration_minutes, user_id="72721"):
     try:
         dt_start = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
         dt_end = dt_start + timedelta(minutes=duration_minutes)
     except ValueError:
         return {"success": False, "error": "Неверный формат даты или времени"}
     data = _call("calendar.event.add", {
-        "type": "user", "ownerId": "me", "name": title,
+        "type": "user", "ownerId": user_id, "name": title,
         "date_from": dt_start.strftime("%Y-%m-%dT%H:%M:%S"),
         "date_to": dt_end.strftime("%Y-%m-%dT%H:%M:%S"),
         "skip_time": "N",

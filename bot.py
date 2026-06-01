@@ -20,15 +20,17 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, filters, ContextTypes
 )
-from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment
-from config import TELEGRAM_TOKEN
 
+from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment, find_user_by_email
+from config import TELEGRAM_TOKEN
+from users import get_bitrix_user, register_user
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
 TITLE, DATE, TIME, DURATION = range(4)
+REGISTER_EMAIL = 10
 
 STATUS_LABELS = {
     "1": "🆕 Новая",
@@ -41,14 +43,45 @@ STATUS_LABELS = {
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "👋 Привет! Я твой помощник по Битрикс24.\n\n"
+    telegram_id = update.effective_user.id
+    user = get_bitrix_user(telegram_id)
+    if user:
+        text = (
+            f"👋 Привет, {user['name']}!\n\n"
+            "📋 /tasks — задачи по группам\n"
+            "📅 /calendar — встречи\n"
+            "➕ /add_meeting — создать встречу\n"
+        )
+        await update.message.reply_text(text)
+    else:
+        await update.message.reply_text(
+            "👋 Привет! Для начала нужно привязать твой аккаунт Битрикс24.\n\n"
+            "Введи свой корпоративный email:"
+        )
+        return REGISTER_EMAIL
+    
+async def register_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    email = update.message.text.strip()
+    await update.message.reply_text("⏳ Ищу тебя в Битрикс24...")
+    
+    result = find_user_by_email(email)
+    
+    if not result["success"]:
+        await update.message.reply_text(
+            "❌ Пользователь с таким email не найден.\n"
+            "Попробуй ещё раз или обратись к администратору."
+        )
+        return REGISTER_EMAIL
+    
+    register_user(update.effective_user.id, result["id"], result["name"])
+    
+    await update.message.reply_text(
+        f"✅ Готово! Привет, {result['name']}!\n\n"
         "📋 /tasks — задачи по группам\n"
         "📅 /calendar — встречи\n"
         "➕ /add_meeting — создать встречу\n"
     )
-    await update.message.reply_text(text)
-
+    return ConversationHandler.END
 
 async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Шаг 1 — выбор группы."""
@@ -105,7 +138,9 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(f"⏳ Загружаю задачи...")
 
-    result = get_tasks(group=group, filter_type=filter_type)
+    bitrix_user = get_bitrix_user(query.from_user.id)
+    user_id = bitrix_user["bitrix_id"] if bitrix_user else "72721"
+    result = get_tasks(group=group, filter_type=filter_type, user_id=user_id)
 
     if not result["success"]:
         await query.edit_message_text(f"❌ Ошибка: {result['error']}")
@@ -156,7 +191,7 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
         await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))
-
+ b
 
 async def calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -179,7 +214,9 @@ async def calendar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(f"⏳ Загружаю встречи на {period_text}...")
 
-    result = get_calendar_events(period=period)
+    bitrix_user = get_bitrix_user(query.from_user.id)
+    user_id = bitrix_user["bitrix_id"] if bitrix_user else "72721"
+    result = get_calendar_events(period=period, user_id=user_id)
 
     if not result["success"]:
         await query.edit_message_text(f"❌ Ошибка: {result['error']}")
@@ -233,12 +270,15 @@ async def add_meeting_duration(update: Update, context: ContextTypes.DEFAULT_TYP
     data = context.user_data
     await update.message.reply_text("⏳ Создаю встречу...")
 
+    bitrix_user = get_bitrix_user(update.effective_user.id)
+    user_id = bitrix_user["bitrix_id"] if bitrix_user else "72721"
     result = create_meeting(
-        title=data["title"],
-        date=data["date"],
-        time=data["time"],
-        duration_minutes=int(data["duration"]),
-    )
+    title=data["title"],
+    date=data["date"],
+    time=data["time"],
+    duration_minutes=int(data["duration"]),
+    user_id=user_id,
+        )
 
     if result["success"]:
         await update.message.reply_text(
@@ -287,6 +327,14 @@ def main():
             BotCommand("add_meeting", "Создать встречу"),
         ])
     app.post_init = set_commands
+    register_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        REGISTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_email)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    app.add_handler(register_handler)
     meeting_handler = ConversationHandler(
         entry_points=[CommandHandler("add_meeting", add_meeting_start)],
         states={
@@ -298,7 +346,6 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("tasks", tasks))
     app.add_handler(CommandHandler("calendar", calendar))
     app.add_handler(CallbackQueryHandler(group_callback, pattern="^group_"))
