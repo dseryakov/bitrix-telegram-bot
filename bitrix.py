@@ -41,7 +41,7 @@ def _call(method, params=None):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-def get_tasks(group="ALL", filter_type="important", user_id="72721")::
+def get_tasks(group="ALL", filter_type="important", user_id="72721"):
     group_ids = ALL_GROUP_IDS if group == "ALL" else GROUPS.get(group, ALL_GROUP_IDS)
     if filter_type == "overdue":
         f = {"GROUP_ID": group_ids, "PRIORITY": "2", "STATUS": "5"}
