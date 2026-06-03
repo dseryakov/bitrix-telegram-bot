@@ -21,7 +21,7 @@ from telegram.ext import (
     ConversationHandler, MessageHandler, filters, ContextTypes
 )
 
-from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment, find_user_by_email
+from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment, find_user_by_email, send_verification_code
 from config import TELEGRAM_TOKEN
 from users import get_bitrix_user, register_user
 logging.basicConfig(
@@ -31,6 +31,7 @@ logging.basicConfig(
 
 TITLE, DATE, TIME, DURATION = range(4)
 REGISTER_EMAIL = 10
+REGISTER_CODE = 11
 
 STATUS_LABELS = {
     "1": "🆕 Новая",
@@ -63,20 +64,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def register_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email = update.message.text.strip()
     await update.message.reply_text("⏳ Ищу тебя в Битрикс24...")
-    
+
     result = find_user_by_email(email)
-    
+
     if not result["success"]:
         await update.message.reply_text(
             "❌ Пользователь с таким email не найден.\n"
             "Попробуй ещё раз или обратись к администратору."
         )
         return REGISTER_EMAIL
-    
-    register_user(update.effective_user.id, result["id"], result["name"])
-    
+
+    # Генерируем код
+    import random
+    code = str(random.randint(100000, 999999))
+
+    # Сохраняем данные пользователя временно
+    context.user_data["bitrix_id"] = result["id"]
+    context.user_data["bitrix_name"] = result["name"]
+
+    # Отправляем код в Битрикс24
+    from users import save_code
+    save_code(update.effective_user.id, code)
+    send_result = send_verification_code(result["id"], code)
+
+    if not send_result["success"]:
+        await update.message.reply_text(f"❌ Не удалось отправить код: {send_result['error']}")
+        return REGISTER_EMAIL
+
     await update.message.reply_text(
-        f"✅ Готово! Привет, {result['name']}!\n\n"
+        f"📨 Код отправлен в твой чат Битрикс24!\n\n"
+        f"Введи 6-значный код из сообщения от Информатора:"
+    )
+    return REGISTER_CODE
+
+
+async def register_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
+    from users import verify_code
+    
+    if not verify_code(update.effective_user.id, code):
+        await update.message.reply_text(
+            "❌ Неверный или истёкший код. Попробуй ещё раз\n"
+            "или напиши /start чтобы начать заново."
+        )
+        return REGISTER_CODE
+
+    # Регистрируем пользователя
+    bitrix_id = context.user_data["bitrix_id"]
+    bitrix_name = context.user_data["bitrix_name"]
+    register_user(update.effective_user.id, bitrix_id, bitrix_name)
+
+    await update.message.reply_text(
+        f"✅ Отлично, {bitrix_name}! Доступ открыт.\n\n"
         "📋 /tasks — задачи по группам\n"
         "📅 /calendar — встречи\n"
         "➕ /add_meeting — создать встречу\n"
@@ -331,6 +370,7 @@ def main():
     entry_points=[CommandHandler("start", start)],
     states={
         REGISTER_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_email)],
+        REGISTER_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_code)],
     },
     fallbacks=[CommandHandler("cancel", cancel)],
     )

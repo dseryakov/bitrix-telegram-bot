@@ -5,6 +5,38 @@
 
 import json
 import os
+import time
+
+CODES_FILE = "codes.json"
+
+def save_code(telegram_id: int, code: str):
+    """Сохранить код верификации с временем истечения."""
+    codes = load_codes()
+    codes[str(telegram_id)] = {
+        "code": code,
+        "expires": time.time() + 300  # 5 минут
+    }
+    with open(CODES_FILE, "w", encoding="utf-8") as f:
+        json.dump(codes, f)
+
+def verify_code(telegram_id: int, code: str) -> bool:
+    """Проверить код верификации."""
+    codes = load_codes()
+    entry = codes.get(str(telegram_id))
+    if not entry:
+        return False
+    if time.time() > entry["expires"]:
+        return False
+    return entry["code"] == code
+
+def load_codes() -> dict:
+    if not os.path.exists(CODES_FILE):
+        return {}
+    try:
+        with open(CODES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 USERS_FILE = "users.json"
 

@@ -32,6 +32,16 @@ def find_user_by_email(email: str) -> dict:
         "name": f"{user.get('NAME', '')} {user.get('LAST_NAME', '')}".strip()
     }
 
+def send_verification_code(bitrix_user_id: str, code: str) -> dict:
+    """Отправить код верификации в личный чат Битрикс24."""
+    data = _call("im.message.add", {
+        "DIALOG_ID": bitrix_user_id,
+        "MESSAGE": f"🔐 Ваш код подтверждения для Telegram-бота: *{code}*\n\nКод действителен 5 минут.",
+    })
+    if "error" in data:
+        return {"success": False, "error": data["error"]}
+    return {"success": True}
+
 def _call(method, params=None):
     url = f"{BITRIX_WEBHOOK_URL}{method}.json"
     try:
