@@ -33,10 +33,10 @@ def find_user_by_email(email: str) -> dict:
     }
 
 def send_verification_code(bitrix_user_id: str, code: str) -> dict:
-    """Отправить код верификации в личный чат Битрикс24."""
-    data = _call("im.message.add", {
-        "DIALOG_ID": bitrix_user_id,
-        "MESSAGE": f"🔐 Ваш код подтверждения для Telegram-бота: *{code}*\n\nКод действителен 5 минут.",
+    """Отправить код верификации через системное уведомление Битрикс24."""
+    data = _call("im.notify.system.add", {
+        "TO": int(bitrix_user_id),
+        "MESSAGE": f"🔐 Ваш код подтверждения для Telegram-бота: {code}\n\nКод действителен 5 минут.",
     })
     if "error" in data:
         return {"success": False, "error": data["error"]}
