@@ -579,6 +579,20 @@ def main():
             BotCommand("analytics", "Аналитика задач"),
             BotCommand("add_meeting", "Создать встречу"),
         ])
+    async def on_startup(app):
+        from analytics import load_user_cache
+        from telegram import BotCommand
+        print("⏳ Загружаю кэш пользователей...")
+        load_user_cache()
+        print("✅ Кэш загружен")
+        await app.bot.set_my_commands([
+            BotCommand("tasks", "Задачи по группам"),
+            BotCommand("calendar", "Встречи"),
+            BotCommand("add_meeting", "Создать встречу"),
+            BotCommand("analytics", "Аналитика задач"),
+        ])
+    
+    app.post_init = on_startup
     app.post_init = set_commands
     register_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start)],

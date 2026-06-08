@@ -265,7 +265,7 @@ def quick_analytics(group="ALL"):
     year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00")
 
     load_user_cache()
-    tasks, total = _get_tasks_with_members(group_ids, year_ago, limit=50)
+    tasks, total = _get_tasks_with_members(group_ids, year_ago, limit=20)
 
     # Загружаем возвраты из БД
     try:
