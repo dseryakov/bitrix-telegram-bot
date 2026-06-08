@@ -468,10 +468,8 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
         return verdict
 
     return_line = f"🔄 Сейчас в стадии возврата: *{result['return_now']}* задач\n"
-    if result.get("return_pct"):
-        return_line += f"📊 За год возвращалось: *{result['return_pct']}%* задач\n"
-    if result.get("problem_tasks"):
-        return_line += f"🐛 Задачи с багами в названии: *{result['problem_tasks']}*\n"
+    if result.get("total_returns"):
+        return_line += f"📊 За год возвращалось: *{result['total_returns']}* задач (*{result['total_return_events']}* раз)\n"
 
     text = (
         f"📊 *Аналитика {group_label}* — {type_label}\n"
@@ -496,7 +494,8 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
             if stat["responsible"]: roles_str.append(f"исполнитель: {stat['responsible']}")
             if stat["accomplice"]: roles_str.append(f"соисполнитель: {stat['accomplice']}")
             if stat["auditor"]: roles_str.append(f"наблюдатель: {stat['auditor']}")
-            text += f"   *{name}*: {stat['count']} задач, avg {format_days(stat['avg_days'])}\n"
+            returns_str = f", возвратов: {stat['returns']} в {stat['tasks_with_returns']} задачах" if stat['returns'] else ""
+            text += f"   *{name}*: {stat['count']} задач, avg {format_days(stat['avg_days'])}{returns_str}\n"
             text += f"   _{', '.join(roles_str)}_\n"
 
     if t.get("by_person"):
@@ -506,7 +505,8 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
             if stat["responsible"]: roles_str.append(f"исполнитель: {stat['responsible']}")
             if stat["accomplice"]: roles_str.append(f"соисполнитель: {stat['accomplice']}")
             if stat["auditor"]: roles_str.append(f"наблюдатель: {stat['auditor']}")
-            text += f"   *{name}*: {stat['count']} задач, avg {format_days(stat['avg_days'])}\n"
+            returns_str = f", возвратов: {stat['returns']} в {stat['tasks_with_returns']} задачах" if stat['returns'] else ""
+            text += f"   *{name}*: {stat['count']} задач, avg {format_days(stat['avg_days'])}{returns_str}\n"
             text += f"   _{', '.join(roles_str)}_\n"
 
     keyboard = [

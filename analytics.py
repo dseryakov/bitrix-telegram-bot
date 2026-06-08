@@ -151,8 +151,11 @@ def _get_tasks_with_members(group_ids, year_ago, limit=50):
     return result, total
 
 
-def _process_tasks(tasks):
+def _process_tasks(tasks, return_counts=None):
     """Обработать задачи и вернуть статистику."""
+    if return_counts is None:
+        return_counts = {}
+    
     with_analyst, without_analyst = [], []
     with_tester, without_tester = [], []
     analyst_stats = {}
@@ -164,15 +167,35 @@ def _process_tasks(tasks):
         if days is None:
             continue
 
-        # Статистика по конкретным специалистам
+        task_id = str(t.get("id", ""))
+        returns = return_counts.get(task_id, 0)
+
+        responsible_id = str(t.get("RESPONSIBLE_ID", ""))
+        accomplices = [str(uid) for uid in t.get("ACCOMPLICES", [])]
+
         for uid in _collect_participant_ids(t):
             pos = _user_cache.get(uid, "")
             role = get_role(pos)
             name = _user_names.get(uid, f"ID {uid}")
-            if role == "analyst":
-                analyst_stats.setdefault(name, []).append(days)
-            elif role == "tester":
-                tester_stats.setdefault(name, []).append(days)
+
+            if role not in ("analyst", "tester"):
+                continue
+
+            if uid == responsible_id:
+                participation = "responsible"
+            elif uid in accomplices:
+                participation = "accomplice"
+            else:
+                participation = "auditor"
+
+            stats = analyst_stats if role == "analyst" else tester_stats
+            if name not in stats:
+                stats[name] = {"days": [], "responsible": 0, "accomplice": 0, "auditor": 0, "returns": 0, "tasks_with_returns": 0}
+            stats[name]["days"].append(days)
+            stats[name][participation] += 1
+            stats[name]["returns"] += returns
+            if returns > 0:
+                stats[name]["tasks_with_returns"] += 1
 
         if "analyst" in roles:
             with_analyst.append(days)
@@ -193,12 +216,28 @@ def _process_tasks(tasks):
         tester_diff = round((1 - _avg(with_tester) / max(_avg(without_tester), 1)) * 100)
 
     analyst_by_person = {
-        name: {"count": len(days), "avg_days": _avg(days)}
-        for name, days in sorted(analyst_stats.items(), key=lambda x: -len(x[1]))
+        name: {
+            "count": len(s["days"]),
+            "avg_days": _avg(s["days"]),
+            "responsible": s["responsible"],
+            "accomplice": s["accomplice"],
+            "auditor": s["auditor"],
+            "returns": s["returns"],
+            "tasks_with_returns": s["tasks_with_returns"],
+        }
+        for name, s in sorted(analyst_stats.items(), key=lambda x: -len(x[1]["days"]))
     }
     tester_by_person = {
-        name: {"count": len(days), "avg_days": _avg(days)}
-        for name, days in sorted(tester_stats.items(), key=lambda x: -len(x[1]))
+        name: {
+            "count": len(s["days"]),
+            "avg_days": _avg(s["days"]),
+            "responsible": s["responsible"],
+            "accomplice": s["accomplice"],
+            "auditor": s["auditor"],
+            "returns": s["returns"],
+            "tasks_with_returns": s["tasks_with_returns"],
+        }
+        for name, s in sorted(tester_stats.items(), key=lambda x: -len(x[1]["days"]))
     }
 
     return {
@@ -222,20 +261,31 @@ def _process_tasks(tasks):
 
 
 def quick_analytics(group="ALL"):
-    """Быстрый анализ — 50 задач."""
     group_ids = GROUPS.get(group, GROUPS["ALL"])
     year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00")
 
     load_user_cache()
     tasks, total = _get_tasks_with_members(group_ids, year_ago, limit=50)
 
-    return_data = _call("tasks.task.list", {
+    # Загружаем возвраты из БД
+    try:
+        from db import get_group_return_stats
+        year_ago_db = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        return_counts = get_group_return_stats(group_ids, year_ago_db)
+        total_returns = len(return_counts)
+        total_return_events = sum(return_counts.values())
+    except Exception:
+        return_counts = {}
+        total_returns = 0
+        total_return_events = 0
+
+    return_now_data = _call("tasks.task.list", {
         "filter": {"GROUP_ID": group_ids, "STAGE_ID": RETURN_STAGES},
         "select": ["ID"], "limit": 1,
     })
-    return_now = return_data.get("total", 0)
+    return_now = return_now_data.get("total", 0)
 
-    stats = _process_tasks(tasks)
+    stats = _process_tasks(tasks, return_counts)
 
     return {
         "success": True,
@@ -244,6 +294,8 @@ def quick_analytics(group="ALL"):
         "total_closed": total,
         "analyzed": len(tasks),
         "return_now": return_now,
+        "total_returns": total_returns,
+        "total_return_events": total_return_events,
         **stats,
     }
 
