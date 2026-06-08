@@ -28,6 +28,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+from analytics import quick_analytics, full_analytics
 
 TITLE, DATE, TIME, DURATION = range(4)
 REGISTER_EMAIL = 10
@@ -353,6 +354,116 @@ async def back_to_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
     ]
     await query.edit_message_text("Выбери группу задач:", reply_markup=InlineKeyboardMarkup(keyboard))
+async def analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton("🌐 WEB", callback_data="anal_WEB"),
+            InlineKeyboardButton("💼 1С", callback_data="anal_1С"),
+        ],
+        [
+            InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="anal_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
+        ],
+    ]
+    await update.message.reply_text("📊 Аналитика — выбери группу:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    group = query.data.replace("anal_", "")
+    context.user_data["anal_group"] = group
+    group_label = group if group != "ALL" else "Все группы"
+    keyboard = [[
+        InlineKeyboardButton("⚡ Быстрый (50 задач)", callback_data="anal_type_quick"),
+        InlineKeyboardButton("🔍 Полный (за год)", callback_data="anal_type_full"),
+    ]]
+    await query.edit_message_text(
+        f"Группа: *{group_label}*\nВыбери тип анализа:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    anal_type = query.data.replace("anal_type_", "")
+    group = context.user_data.get("anal_group", "ALL")
+    group_label = group if group != "ALL" else "Все группы"
+    type_label = "⚡ Быстрый" if anal_type == "quick" else "🔍 Полный"
+
+    await query.edit_message_text(f"⏳ Считаю аналитику для {group_label}...")
+
+    result = quick_analytics(group) if anal_type == "quick" else full_analytics(group)
+
+    if not result["success"]:
+        await query.edit_message_text(f"❌ Ошибка: {result.get('error')}")
+        return
+
+    a = result["analyst"]
+    t = result["tester"]
+    analyzed = result.get("analyzed") or result.get("total_closed", 0)
+
+    def conclusion(diff, role):
+        if diff > 0:
+            return f"✅ С {role} быстрее на {diff}%"
+        elif diff < 0:
+            return f"📌 Задачи с {role} сложнее — дольше на {abs(diff)}%"
+        return f"➡️ {role.capitalize()} не влияет на скорость"
+
+    return_line = f"🔄 Сейчас в стадии возврата: *{result['return_now']}* задач\n"
+    if result.get("return_pct"):
+        return_line += f"📊 За год возвращалось: *{result['return_pct']}%* задач\n"
+    if result.get("problem_tasks"):
+        return_line += f"🐛 Задачи с багами в названии: *{result['problem_tasks']}*\n"
+
+    text = (
+        f"📊 *Аналитика {group_label}* — {type_label}\n"
+        f"Проанализировано: *{analyzed}* из {result['total_closed']} задач\n\n"
+        f"*👨‍💼 Роль аналитика:*\n"
+        f"С аналитиком: {a['with_count']} задач, avg {a['with_avg_days']} дн.\n"
+        f"Без аналитика: {a['without_count']} задач, avg {a['without_avg_days']} дн.\n"
+        f"{conclusion(a['faster_pct'], 'аналитиком')}\n\n"
+        f"*🧪 Роль тестировщика:*\n"
+        f"С тестировщиком: {t['with_count']} задач, avg {t['with_avg_days']} дн.\n"
+        f"Без тестировщика: {t['without_count']} задач, avg {t['without_avg_days']} дн.\n"
+        f"{conclusion(t['faster_pct'], 'тестировщиком')}\n\n"
+        f"{return_line}"
+    )
+
+    # Блок по аналитикам
+    if a.get("by_person"):
+        text += "\n*👤 Аналитики:*\n"
+        for name, stat in list(a["by_person"].items())[:5]:
+            text += f"   {name}: {stat['count']} задач, avg {stat['avg_days']} дн.\n"
+
+    # Блок по тестировщикам
+    if t.get("by_person"):
+        text += "\n*🧪 Тестировщики:*\n"
+        for name, stat in list(t["by_person"].items())[:5]:
+            text += f"   {name}: {stat['count']} задач, avg {stat['avg_days']} дн.\n"
+
+    keyboard = [[InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="anal_back")]]
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*", ""), reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def analytics_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [
+            InlineKeyboardButton("🌐 WEB", callback_data="anal_WEB"),
+            InlineKeyboardButton("💼 1С", callback_data="anal_1С"),
+        ],
+        [
+            InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="anal_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
+        ],
+    ]
+    await query.edit_message_text("📊 Аналитика — выбери группу:", reply_markup=InlineKeyboardMarkup(keyboard))    
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -363,6 +474,7 @@ def main():
         await app.bot.set_my_commands([
             BotCommand("tasks", "Задачи по группам"),
             BotCommand("calendar", "Встречи"),
+            BotCommand("analytics", "Аналитика задач"),
             BotCommand("add_meeting", "Создать встречу"),
         ])
     app.post_init = set_commands
@@ -393,6 +505,10 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_groups, pattern="^back_to_groups$"))
     app.add_handler(CallbackQueryHandler(calendar_callback, pattern="^cal_"))
     app.add_handler(meeting_handler)
+    app.add_handler(CommandHandler("analytics", analytics))
+    app.add_handler(CallbackQueryHandler(analytics_group_callback, pattern="^anal_(?!type_|back)"))
+    app.add_handler(CallbackQueryHandler(analytics_type_callback, pattern="^anal_type_"))
+    app.add_handler(CallbackQueryHandler(analytics_back_callback, pattern="^anal_back$"))
 
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
     app.run_polling()
