@@ -384,6 +384,10 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+async def resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from users import save_users
+    save_users({})
+    await update.message.reply_text("✅ Все пользователи сброшены. Напиши /start для повторной авторизации.")
 
 async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -444,7 +448,10 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
         for name, stat in list(t["by_person"].items())[:5]:
             text += f"   {name}: {stat['count']} задач, avg {stat['avg_days']} дн.\n"
 
-    keyboard = [[InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="anal_back")]]
+    keyboard = [
+        [InlineKeyboardButton("🔄 Возвраты по специалистам", callback_data=f"anal_returns_{group}")],
+        [InlineKeyboardButton("🔙 Выбрать другую группу", callback_data="anal_back")],
+    ]
     try:
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
@@ -463,7 +470,41 @@ async def analytics_back_callback(update: Update, context: ContextTypes.DEFAULT_
             InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
         ],
     ]
-    await query.edit_message_text("📊 Аналитика — выбери группу:", reply_markup=InlineKeyboardMarkup(keyboard))    
+    await query.edit_message_text("📊 Аналитика — выбери группу:", reply_markup=InlineKeyboardMarkup(keyboard))  
+
+async def analytics_returns_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    group = query.data.replace("anal_returns_", "")
+    group_label = group if group != "ALL" else "Все группы"
+
+    await query.edit_message_text(f"⏳ Считаю возвраты для {group_label}...")
+
+    from analytics import return_analytics
+    result = return_analytics(group)
+
+    text = (
+        f"🔄 *Возвраты на доработку — {group_label}*\n"
+        f"Всего задач в стадии возврата: *{result['total_return']}*\n"
+        f"Без аналитика и тестировщика: *{result['no_specialist']}*\n\n"
+    )
+
+    if result["analyst_returns"]:
+        text += "*👨‍💼 Аналитики в возвращённых задачах:*\n"
+        for name, count in list(result["analyst_returns"].items())[:7]:
+            text += f"   {name}: *{count}* задач\n"
+        text += "\n"
+
+    if result["tester_returns"]:
+        text += "*🧪 Тестировщики в возвращённых задачах:*\n"
+        for name, count in list(result["tester_returns"].items())[:7]:
+            text += f"   {name}: *{count}* задач\n"
+
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="anal_back")]]
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*", ""), reply_markup=InlineKeyboardMarkup(keyboard))      
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -509,6 +550,8 @@ def main():
     app.add_handler(CallbackQueryHandler(analytics_group_callback, pattern="^anal_(?!type_|back)"))
     app.add_handler(CallbackQueryHandler(analytics_type_callback, pattern="^anal_type_"))
     app.add_handler(CallbackQueryHandler(analytics_back_callback, pattern="^anal_back$"))
+    app.add_handler(CommandHandler("resetall", resetall))
+    app.add_handler(CallbackQueryHandler(analytics_returns_callback, pattern="^anal_returns_"))
 
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
     app.run_polling()

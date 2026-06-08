@@ -326,3 +326,67 @@ def full_analytics(group="ALL"):
         "problem_tasks": problem_count,
         **stats,
     }
+def return_analytics(group="ALL"):
+    """Анализ задач в стадии возврата по специалистам."""
+    group_ids = GROUPS.get(group, GROUPS["ALL"])
+    load_user_cache()
+
+    # Получаем все задачи в стадии возврата
+    all_return_tasks = []
+    start = 0
+    while True:
+        data = _call("tasks.task.list", {
+            "filter": {"GROUP_ID": group_ids, "STAGE_ID": RETURN_STAGES},
+            "select": ["ID", "TITLE", "STAGE_ID"],
+            "limit": 50,
+            "start": start,
+        })
+        tasks = data.get("result", {}).get("tasks", [])
+        if not tasks:
+            break
+        all_return_tasks.extend(tasks)
+        total = data.get("total", 0)
+        start += 50
+        if start >= total:
+            break
+
+    analyst_returns = {}  # {name: count}
+    tester_returns = {}
+    no_specialist = 0
+
+    for t in all_return_tasks:
+        members = _call("task.item.list", {
+            "ORDER": {}, "FILTER": {"ID": t["id"]}, "PARAMS": {},
+            "SELECT": ["ID", "RESPONSIBLE_ID", "CREATED_BY", "AUDITORS", "ACCOMPLICES"]
+        })
+        m = members.get("result", [{}])[0] if members.get("result") else {}
+
+        all_ids = set()
+        all_ids.add(str(m.get("RESPONSIBLE_ID", "")))
+        all_ids.add(str(m.get("CREATED_BY", "")))
+        for uid in m.get("AUDITORS", []) + m.get("ACCOMPLICES", []):
+            all_ids.add(str(uid))
+        all_ids.discard("")
+
+        has_specialist = False
+        for uid in all_ids:
+            pos = _user_cache.get(uid, "")
+            role = get_role(pos)
+            name = _user_names.get(uid, f"ID {uid}")
+            if role == "analyst":
+                analyst_returns[name] = analyst_returns.get(name, 0) + 1
+                has_specialist = True
+            elif role == "tester":
+                tester_returns[name] = tester_returns.get(name, 0) + 1
+                has_specialist = True
+
+        if not has_specialist:
+            no_specialist += 1
+
+    return {
+        "success": True,
+        "total_return": len(all_return_tasks),
+        "no_specialist": no_specialist,
+        "analyst_returns": dict(sorted(analyst_returns.items(), key=lambda x: -x[1])),
+        "tester_returns": dict(sorted(tester_returns.items(), key=lambda x: -x[1])),
+    }
