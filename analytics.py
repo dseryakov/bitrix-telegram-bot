@@ -118,26 +118,36 @@ def _collect_participant_ids(task):
     return ids
 
 
-def _get_tasks_quick(group_ids, year_ago, limit=50):
+def _get_tasks_quick(group_ids, year_ago, limit=500):
     """Быстрое получение задач без доп запросов на участников."""
-    data = _call("tasks.task.list", {
-        "filter": {"GROUP_ID": group_ids, ">=CLOSED_DATE": year_ago},
-        "select": ["ID", "CLOSED_DATE", "CREATED_DATE", "TITLE",
-                   "RESPONSIBLE_ID", "CREATED_BY", "AUDITORS", "ACCOMPLICES"],
-        "order": {"CLOSED_DATE": "DESC"},
-        "limit": limit,
-    })
-    if "error" in data:
-        return [], 0
-    tasks = data.get("result", {}).get("tasks", [])
-    total = data.get("total", 0)
-    # Переименуем поля в верхний регистр для совместимости
-    for t in tasks:
-        t["RESPONSIBLE_ID"] = t.get("responsibleId", "")
-        t["CREATED_BY"] = t.get("createdBy", "")
-        t["AUDITORS"] = t.get("auditors", [])
-        t["ACCOMPLICES"] = t.get("accomplices", [])
-    return tasks, total
+    all_tasks = []
+    start = 0
+    while True:
+        data = _call("tasks.task.list", {
+            "filter": {"GROUP_ID": group_ids, ">=CLOSED_DATE": year_ago},
+            "select": ["ID", "CLOSED_DATE", "CREATED_DATE", "TITLE",
+                       "RESPONSIBLE_ID", "CREATED_BY", "AUDITORS", "ACCOMPLICES"],
+            "order": {"CLOSED_DATE": "DESC"},
+            "limit": 50,
+            "start": start,
+        })
+        if "error" in data:
+            break
+        tasks = data.get("result", {}).get("tasks", [])
+        if not tasks:
+            break
+        for t in tasks:
+            t["RESPONSIBLE_ID"] = t.get("responsibleId", "")
+            t["CREATED_BY"] = t.get("createdBy", "")
+            t["AUDITORS"] = t.get("auditors", [])
+            t["ACCOMPLICES"] = t.get("accomplices", [])
+        all_tasks.extend(tasks)
+        total = data.get("total", 0)
+        start += 50
+        if start >= total or start >= limit:
+            break
+
+    return all_tasks, data.get("total", 0) if all_tasks else 0
 
 
 def _process_tasks(tasks, return_counts=None):
@@ -254,7 +264,7 @@ def quick_analytics(group="ALL"):
     year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00")
 
     load_user_cache()
-    tasks, total = _get_tasks_quick(group_ids, year_ago, limit=200)
+    tasks, total = _get_tasks_quick(group_ids, year_ago, limit=500)
 
     # Загружаем возвраты из БД
     try:
