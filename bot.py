@@ -389,6 +389,32 @@ async def resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_users({})
     await update.message.reply_text("✅ Все пользователи сброшены. Напиши /start для повторной авторизации.")
 
+def format_days(days):
+    if days is None:
+        return "—"
+    days = int(days)
+    if days < 7:
+        return f"{days} дн."
+    elif days < 30:
+        weeks = days // 7
+        remainder = days % 7
+        if remainder:
+            return f"{weeks} нед. {remainder} дн."
+        return f"{weeks} нед."
+    elif days < 365:
+        months = days // 30
+        remainder = days % 30
+        if remainder:
+            return f"{months} мес. {remainder} дн."
+        return f"{months} мес."
+    else:
+        years = days // 365
+        remainder = days % 365
+        if remainder:
+            months = remainder // 30
+            return f"{years} г. {months} мес." if months else f"{years} г."
+        return f"{years} г."
+
 async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -424,19 +450,19 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
         if diff > 10:
             verdict = (
                 f"✅ *Вывод:* с {role_name} задачи закрываются быстрее на {diff}%\n"
-                f"   ({w_avg} дн. vs {wo_avg} дн.) — {role_name} ускоряет процесс"
+                f"   ({format_days(w_avg)} vs {format_days(wo_avg)}) — {role_name} ускоряет процесс"
             )
         elif diff < -10:
             verdict = (
                 f"📌 *Вывод:* задачи с {role_name} сложнее и дольше на {abs(diff)}%\n"
-                f"   ({w_avg} дн. vs {wo_avg} дн.)\n"
+                f"   ({format_days(w_avg)} vs {format_days(wo_avg)})\n"
                 f"   💡 Это норма — {role_name} берётся за нетривиальные задачи.\n"
                 f"   Важнее смотреть на % возвратов и качество сдачи."
             )
         else:
             verdict = (
                 f"➡️ *Вывод:* {role_name} не влияет на скорость закрытия\n"
-                f"   ({w_avg} дн. vs {wo_avg} дн.) — разница несущественна"
+                f"   ({format_days(w_avg)} vs {format_days(wo_avg)}) — разница несущественна"
             )
 
         return verdict
@@ -452,12 +478,12 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
         f"Проанализировано: *{analyzed}* из {result['total_closed']} закрытых задач за год\n"
         f"_(avg = среднее время от создания до закрытия)_\n\n"
         f"*👨‍💼 Роль аналитика:*\n"
-        f"• С аналитиком: {a['with_count']} задач — avg *{a['with_avg_days']} дн.*\n"
-        f"• Без аналитика: {a['without_count']} задач — avg *{a['without_avg_days']} дн.*\n"
+        f"• С аналитиком: {a['with_count']} задач — avg *{format_days(a['with_avg_days'])}*\n"
+        f"• Без аналитика: {a['without_count']} задач — avg *{format_days(a['without_avg_days'])}*\n"
         f"{conclusion(a, 'аналитиком')}\n\n"
         f"*🧪 Роль тестировщика:*\n"
-        f"• С тестировщиком: {t['with_count']} задач — avg *{t['with_avg_days']} дн.*\n"
-        f"• Без тестировщика: {t['without_count']} задач — avg *{t['without_avg_days']} дн.*\n"
+        f"• С тестировщиком: {t['with_count']} задач — avg *{format_days(t['with_avg_days'])}*\n"
+        f"• Без тестировщика: {t['without_count']} задач — avg *{format_days(t['without_avg_days'])}*\n"
         f"{conclusion(t, 'тестировщиком')}\n\n"
         f"{return_line}"
     )
@@ -466,13 +492,22 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
     if a.get("by_person"):
         text += "\n*👤 Аналитики:*\n"
         for name, stat in list(a["by_person"].items())[:5]:
-            text += f"   {name}: {stat['count']} задач, avg {stat['avg_days']} дн.\n"
+            roles_str = []
+            if stat["responsible"]: roles_str.append(f"исполнитель: {stat['responsible']}")
+            if stat["accomplice"]: roles_str.append(f"соисполнитель: {stat['accomplice']}")
+            if stat["auditor"]: roles_str.append(f"наблюдатель: {stat['auditor']}")
+            text += f"   *{name}*: {stat['count']} задач, avg {format_days(stat['avg_days'])}\n"
+            text += f"   _{', '.join(roles_str)}_\n"
 
-    # Блок по тестировщикам
     if t.get("by_person"):
         text += "\n*🧪 Тестировщики:*\n"
         for name, stat in list(t["by_person"].items())[:5]:
-            text += f"   {name}: {stat['count']} задач, avg {stat['avg_days']} дн.\n"
+            roles_str = []
+            if stat["responsible"]: roles_str.append(f"исполнитель: {stat['responsible']}")
+            if stat["accomplice"]: roles_str.append(f"соисполнитель: {stat['accomplice']}")
+            if stat["auditor"]: roles_str.append(f"наблюдатель: {stat['auditor']}")
+            text += f"   *{name}*: {stat['count']} задач, avg {format_days(stat['avg_days'])}\n"
+            text += f"   _{', '.join(roles_str)}_\n"
 
     keyboard = [
         [InlineKeyboardButton("🔄 Возвраты по специалистам", callback_data=f"anal_returns_{group}")],
