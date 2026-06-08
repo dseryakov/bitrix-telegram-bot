@@ -118,37 +118,26 @@ def _collect_participant_ids(task):
     return ids
 
 
-def _get_tasks_with_members(group_ids, year_ago, limit=50):
-    """Получить задачи и их участников."""
+def _get_tasks_quick(group_ids, year_ago, limit=50):
+    """Быстрое получение задач без доп запросов на участников."""
     data = _call("tasks.task.list", {
         "filter": {"GROUP_ID": group_ids, ">=CLOSED_DATE": year_ago},
-        "select": ["ID", "CLOSED_DATE", "CREATED_DATE", "TITLE"],
+        "select": ["ID", "CLOSED_DATE", "CREATED_DATE", "TITLE",
+                   "RESPONSIBLE_ID", "CREATED_BY", "AUDITORS", "ACCOMPLICES"],
         "order": {"CLOSED_DATE": "DESC"},
         "limit": limit,
     })
     if "error" in data:
         return [], 0
-
-    tasks_basic = data.get("result", {}).get("tasks", [])
+    tasks = data.get("result", {}).get("tasks", [])
     total = data.get("total", 0)
-
-    result = []
-    for t in tasks_basic:
-        members = _call("task.item.list", {
-            "ORDER": {},
-            "FILTER": {"ID": t["id"]},
-            "PARAMS": {},
-            "SELECT": ["ID", "RESPONSIBLE_ID", "CREATED_BY", "AUDITORS", "ACCOMPLICES"]
-        })
-        member_data = members.get("result", [{}])
-        m = member_data[0] if member_data else {}
-        t["RESPONSIBLE_ID"] = m.get("RESPONSIBLE_ID", "")
-        t["CREATED_BY"] = m.get("CREATED_BY", "")
-        t["AUDITORS"] = m.get("AUDITORS", [])
-        t["ACCOMPLICES"] = m.get("ACCOMPLICES", [])
-        result.append(t)
-
-    return result, total
+    # Переименуем поля в верхний регистр для совместимости
+    for t in tasks:
+        t["RESPONSIBLE_ID"] = t.get("responsibleId", "")
+        t["CREATED_BY"] = t.get("createdBy", "")
+        t["AUDITORS"] = t.get("auditors", [])
+        t["ACCOMPLICES"] = t.get("accomplices", [])
+    return tasks, total
 
 
 def _process_tasks(tasks, return_counts=None):
@@ -265,7 +254,7 @@ def quick_analytics(group="ALL"):
     year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00")
 
     load_user_cache()
-    tasks, total = _get_tasks_with_members(group_ids, year_ago, limit=20)
+    tasks, total = _get_tasks_quick(group_ids, year_ago, limit=200)
 
     # Загружаем возвраты из БД
     try:
