@@ -409,12 +409,37 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
     t = result["tester"]
     analyzed = result.get("analyzed") or result.get("total_closed", 0)
 
-    def conclusion(diff, role):
-        if diff > 0:
-            return f"✅ С {role} быстрее на {diff}%"
-        elif diff < 0:
-            return f"📌 Задачи с {role} сложнее — дольше на {abs(diff)}%"
-        return f"➡️ {role.capitalize()} не влияет на скорость"
+    def conclusion(a_or_t, role_name):
+        wc = a_or_t["with_count"]
+        woc = a_or_t["without_count"]
+        w_avg = a_or_t["with_avg_days"]
+        wo_avg = a_or_t["without_avg_days"]
+        diff = a_or_t["faster_pct"]
+
+        if wc == 0:
+            return f"📭 Задач с {role_name} не найдено в выборке"
+        if woc == 0:
+            return f"📌 Все задачи выборки с {role_name}"
+
+        if diff > 10:
+            verdict = (
+                f"✅ *Вывод:* с {role_name} задачи закрываются быстрее на {diff}%\n"
+                f"   ({w_avg} дн. vs {wo_avg} дн.) — {role_name} ускоряет процесс"
+            )
+        elif diff < -10:
+            verdict = (
+                f"📌 *Вывод:* задачи с {role_name} сложнее и дольше на {abs(diff)}%\n"
+                f"   ({w_avg} дн. vs {wo_avg} дн.)\n"
+                f"   💡 Это норма — {role_name} берётся за нетривиальные задачи.\n"
+                f"   Важнее смотреть на % возвратов и качество сдачи."
+            )
+        else:
+            verdict = (
+                f"➡️ *Вывод:* {role_name} не влияет на скорость закрытия\n"
+                f"   ({w_avg} дн. vs {wo_avg} дн.) — разница несущественна"
+            )
+
+        return verdict
 
     return_line = f"🔄 Сейчас в стадии возврата: *{result['return_now']}* задач\n"
     if result.get("return_pct"):
@@ -424,15 +449,16 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
 
     text = (
         f"📊 *Аналитика {group_label}* — {type_label}\n"
-        f"Проанализировано: *{analyzed}* из {result['total_closed']} задач\n\n"
+        f"Проанализировано: *{analyzed}* из {result['total_closed']} закрытых задач за год\n"
+        f"_(avg = среднее время от создания до закрытия)_\n\n"
         f"*👨‍💼 Роль аналитика:*\n"
-        f"С аналитиком: {a['with_count']} задач, avg {a['with_avg_days']} дн.\n"
-        f"Без аналитика: {a['without_count']} задач, avg {a['without_avg_days']} дн.\n"
-        f"{conclusion(a['faster_pct'], 'аналитиком')}\n\n"
+        f"• С аналитиком: {a['with_count']} задач — avg *{a['with_avg_days']} дн.*\n"
+        f"• Без аналитика: {a['without_count']} задач — avg *{a['without_avg_days']} дн.*\n"
+        f"{conclusion(a, 'аналитиком')}\n\n"
         f"*🧪 Роль тестировщика:*\n"
-        f"С тестировщиком: {t['with_count']} задач, avg {t['with_avg_days']} дн.\n"
-        f"Без тестировщика: {t['without_count']} задач, avg {t['without_avg_days']} дн.\n"
-        f"{conclusion(t['faster_pct'], 'тестировщиком')}\n\n"
+        f"• С тестировщиком: {t['with_count']} задач — avg *{t['with_avg_days']} дн.*\n"
+        f"• Без тестировщика: {t['without_count']} задач — avg *{t['without_avg_days']} дн.*\n"
+        f"{conclusion(t, 'тестировщиком')}\n\n"
         f"{return_line}"
     )
 
