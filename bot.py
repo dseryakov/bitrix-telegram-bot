@@ -429,6 +429,7 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
     result = quick_analytics(group) if anal_type == "quick" else full_analytics(group)
     keyboard = [
     [InlineKeyboardButton("👤 По специалисту", callback_data="anal_specialist")],
+
     [InlineKeyboardButton("🔄 Возвраты по специалистам", callback_data=f"anal_returns_{group}")],
     [InlineKeyboardButton("🔙 Выбрать другую группу", callback_data="anal_back")],
 ]
