@@ -51,6 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"👋 Привет, {user['name']}!\n\n"
             "📋 /tasks — задачи по группам\n"
+            "📊 /analytics — анализ по специалистам\n"
             "📅 /calendar — встречи\n"
             "➕ /add_meeting — создать встречу\n"
         )
@@ -375,7 +376,7 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
     context.user_data["anal_group"] = group
     group_label = group if group != "ALL" else "Все группы"
     keyboard = [[
-        InlineKeyboardButton("⚡ Быстрый (50 задач)", callback_data="anal_type_quick"),
+        InlineKeyboardButton("⚡ Быстрый (500 задач)", callback_data="anal_type_quick"),
         InlineKeyboardButton("🔍 Полный (за год)", callback_data="anal_type_full"),
     ]]
     await query.edit_message_text(
