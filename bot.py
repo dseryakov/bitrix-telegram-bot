@@ -426,6 +426,11 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text(f"⏳ Считаю аналитику для {group_label}...")
 
     result = quick_analytics(group) if anal_type == "quick" else full_analytics(group)
+    keyboard = [
+        [InlineKeyboardButton("👤 По специалисту", callback_data="anal_specialist")],
+        [InlineKeyboardButton("🔄 Возвраты по специалистам", callback_data=f"anal_returns_{group}")],
+        [InlineKeyboardButton("🔙 Выбрать другую группу", callback_data="anal_back")],
+    ]
 
     if not result["success"]:
         await query.edit_message_text(f"❌ Ошибка: {result.get('error')}")
@@ -565,7 +570,97 @@ async def analytics_returns_callback(update: Update, context: ContextTypes.DEFAU
     try:
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
-        await query.edit_message_text(text.replace("*", ""), reply_markup=InlineKeyboardMarkup(keyboard))      
+        await query.edit_message_text(text.replace("*", ""), reply_markup=InlineKeyboardMarkup(keyboard))  
+
+ async def analytics_specialist_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выбор роли специалиста для детального анализа."""
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [
+            InlineKeyboardButton("👨‍💼 Аналитики", callback_data="spec_role_analyst"),
+            InlineKeyboardButton("🧪 Тестировщики", callback_data="spec_role_tester"),
+        ],
+        [InlineKeyboardButton("🔙 Назад", callback_data="anal_back")],
+    ]
+    await query.edit_message_text("Выбери роль специалиста:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def analytics_specialist_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список специалистов выбранной роли."""
+    query = update.callback_query
+    await query.answer()
+    role = query.data.replace("spec_role_", "")
+    context.user_data["spec_role"] = role
+
+    from analytics import get_specialists_list
+    specialists = get_specialists_list(role)
+
+    if not specialists:
+        await query.edit_message_text("❌ Специалисты не найдены.")
+        return
+
+    keyboard = []
+    for s in specialists[:20]:  # максимум 20 кнопок
+        short_name = " ".join(s["name"].split()[:2])  # Фамилия Имя
+        keyboard.append([InlineKeyboardButton(short_name, callback_data=f"spec_id_{s['id']}")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="anal_specialist")])
+
+    role_label = "аналитиков" if role == "analyst" else "тестировщиков"
+    await query.edit_message_text(
+        f"Выбери специалиста из списка {role_label}:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Детальная аналитика по специалисту."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.data.replace("spec_id_", "")
+
+    await query.edit_message_text("⏳ Загружаю аналитику по специалисту...")
+
+    from analytics import specialist_analytics
+    result = specialist_analytics(user_id)
+
+    if not result["success"]:
+        await query.edit_message_text(f"❌ Ошибка: {result.get('error')}")
+        return
+
+    r = result["responsible"]
+    a = result["accomplice"]
+
+    resp_bar = "🟢" * (r["closed_pct"] // 20) + "⚪" * (5 - r["closed_pct"] // 20)
+    acc_bar = "🟢" * (a["closed_pct"] // 20) + "⚪" * (5 - a["closed_pct"] // 20)
+
+    text = (
+        f"👤 *{result['name']}*\n"
+        f"_{result['position']}_\n\n"
+        f"*📋 Как исполнитель* (за год + активные):\n"
+        f"Всего задач: *{r['total']}*\n"
+        f"✅ Закрытых: *{r['closed']}* ({r['closed_pct']}%)\n"
+        f"⏳ Активных: *{r['open']}*\n"
+        f"{resp_bar}\n\n"
+        f"*🤝 Как соисполнитель* (за год + активные):\n"
+        f"Всего задач: *{a['total']}*\n"
+        f"✅ Закрытых: *{a['closed']}* ({a['closed_pct']}%)\n"
+        f"⏳ Активных: *{a['open']}*\n"
+        f"{acc_bar}\n\n"
+        f"*🔄 Возвраты на доработку за год:*\n"
+        f"Задач с возвратами: *{result['returns_tasks']}*\n"
+        f"Всего возвратов: *{result['returns_events']}* раз\n"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🔙 К списку", callback_data=f"spec_role_{context.user_data.get('spec_role', 'analyst')}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="anal_back")],
+    ]
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))       
+
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -627,6 +722,9 @@ def main():
     app.add_handler(CallbackQueryHandler(analytics_back_callback, pattern="^anal_back$"))
     app.add_handler(CommandHandler("resetall", resetall))
     app.add_handler(CallbackQueryHandler(analytics_returns_callback, pattern="^anal_returns_"))
+    app.add_handler(CallbackQueryHandler(analytics_specialist_role, pattern="^anal_specialist$"))
+    app.add_handler(CallbackQueryHandler(analytics_specialist_list, pattern="^spec_role_"))
+    app.add_handler(CallbackQueryHandler(analytics_specialist_detail, pattern="^spec_id_"))
 
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
     app.run_polling()

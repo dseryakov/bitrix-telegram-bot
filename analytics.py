@@ -258,6 +258,108 @@ def _process_tasks(tasks, return_counts=None):
         },
     }
 
+def specialist_analytics(user_id: str) -> dict:
+    """Детальная аналитика по конкретному специалисту."""
+    year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00")
+    load_user_cache()
+
+    name = _user_names.get(str(user_id), f"ID {user_id}")
+    position = _user_cache.get(str(user_id), "")
+
+    # Исполнитель
+    r_closed = _call("tasks.task.list", {
+        "filter": {"RESPONSIBLE_ID": user_id, ">=CLOSED_DATE": year_ago},
+        "select": ["ID", "CLOSED_DATE", "CREATED_DATE", "GROUP_ID"],
+        "limit": 1,
+    })
+    resp_closed = r_closed.get("total", 0)
+
+    r_open = _call("tasks.task.list", {
+        "filter": {"RESPONSIBLE_ID": user_id, "STATUS": [1, 2, 3, 6]},
+        "select": ["ID"],
+        "limit": 1,
+    })
+    resp_open = r_open.get("total", 0)
+
+    # Соисполнитель
+    a_closed = _call("tasks.task.list", {
+        "filter": {"ACCOMPLICE": user_id, ">=CLOSED_DATE": year_ago},
+        "select": ["ID"],
+        "limit": 1,
+    })
+    acc_closed = a_closed.get("total", 0)
+
+    a_open = _call("tasks.task.list", {
+        "filter": {"ACCOMPLICE": user_id, "STATUS": [1, 2, 3, 6]},
+        "select": ["ID"],
+        "limit": 1,
+    })
+    acc_open = a_open.get("total", 0)
+
+    # Возвраты из БД
+    returns_total = 0
+    try:
+        from db import get_connection
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT tl.TASK_ID) as cnt, SUM(1) as events
+                FROM b_tasks_log tl
+                JOIN b_tasks t ON t.ID = tl.TASK_ID
+                WHERE tl.FIELD = 'STAGE'
+                AND tl.TO_VALUE IN ('Правки/Доработки', 'Возврат на доработку', 'На доработке')
+                AND tl.CREATED_DATE >= %s
+                AND (t.RESPONSIBLE_ID = %s OR t.ID IN (
+                    SELECT TASK_ID FROM b_tasks_member 
+                    WHERE USER_ID = %s AND TYPE = 'A'
+                ))
+            """, [year_ago[:10], user_id, user_id])
+            row = cursor.fetchone()
+            returns_tasks = int(row["cnt"]) if row else 0
+            returns_events = int(row["events"]) if row else 0
+        conn.close()
+    except Exception as e:
+        returns_tasks = 0
+        returns_events = 0
+
+    # Процентное соотношение
+    resp_total = resp_closed + resp_open
+    acc_total = acc_closed + acc_open
+
+    resp_closed_pct = round(resp_closed / max(resp_total, 1) * 100)
+    acc_closed_pct = round(acc_closed / max(acc_total, 1) * 100)
+
+    return {
+        "success": True,
+        "user_id": user_id,
+        "name": name,
+        "position": position,
+        "responsible": {
+            "closed": resp_closed,
+            "open": resp_open,
+            "total": resp_total,
+            "closed_pct": resp_closed_pct,
+        },
+        "accomplice": {
+            "closed": acc_closed,
+            "open": acc_open,
+            "total": acc_total,
+            "closed_pct": acc_closed_pct,
+        },
+        "returns_tasks": returns_tasks,
+        "returns_events": returns_events,
+    }
+
+
+def get_specialists_list(role: str = "analyst") -> list:
+    """Получить список специалистов нужной роли."""
+    load_user_cache()
+    result = []
+    for uid, pos in _user_cache.items():
+        if get_role(pos) == role:
+            name = _user_names.get(uid, f"ID {uid}")
+            result.append({"id": uid, "name": name, "position": pos})
+    return sorted(result, key=lambda x: x["name"])
 
 def quick_analytics(group="ALL"):
     group_ids = GROUPS.get(group, GROUPS["ALL"])
