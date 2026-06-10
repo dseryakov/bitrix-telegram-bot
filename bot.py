@@ -571,8 +571,7 @@ async def analytics_returns_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
         await query.edit_message_text(text.replace("*", ""), reply_markup=InlineKeyboardMarkup(keyboard))  
-
- async def analytics_specialist_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def analytics_specialist_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Выбор роли специалиста для детального анализа."""
     query = update.callback_query
     await query.answer()
@@ -584,8 +583,6 @@ async def analytics_returns_callback(update: Update, context: ContextTypes.DEFAU
         [InlineKeyboardButton("🔙 Назад", callback_data="anal_back")],
     ]
     await query.edit_message_text("Выбери роль специалиста:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-
 async def analytics_specialist_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Список специалистов выбранной роли."""
     query = update.callback_query
