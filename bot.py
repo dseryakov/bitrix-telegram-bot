@@ -711,7 +711,7 @@ def main():
     app.add_handler(CallbackQueryHandler(calendar_callback, pattern="^cal_"))
     app.add_handler(meeting_handler)
     app.add_handler(CommandHandler("analytics", analytics))
-    app.add_handler(CallbackQueryHandler(analytics_group_callback, pattern="^anal_(?!type_|back)"))
+    app.add_handler(CallbackQueryHandler(analytics_group_callback, pattern="^anal_(?!type_|back|specialist|returns_)"))
     app.add_handler(CallbackQueryHandler(analytics_type_callback, pattern="^anal_type_"))
     app.add_handler(CallbackQueryHandler(analytics_back_callback, pattern="^anal_back$"))
     app.add_handler(CommandHandler("resetall", resetall))
