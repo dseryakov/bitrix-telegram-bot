@@ -298,27 +298,29 @@ def specialist_analytics(user_id: str) -> dict:
     })
     acc_open = a_open.get("total", 0)
 
-    # Возвраты из БД
-    returns_total = 0
+    # Возвраты из БД — поле STAGE с текстовыми названиями (как в db.py)
     try:
-        from db import get_connection
+        from db import get_connection, RETURN_STAGES as DB_RETURN_STAGES
         conn = get_connection()
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT COUNT(DISTINCT tl.TASK_ID) as cnt, SUM(1) as events
+                SELECT COUNT(DISTINCT tl.TASK_ID) as cnt, COUNT(*) as events
                 FROM b_tasks_log tl
                 JOIN b_tasks t ON t.ID = tl.TASK_ID
                 WHERE tl.FIELD = 'STAGE'
-                AND tl.TO_VALUE IN ('Правки/Доработки', 'Возврат на доработку', 'На доработке')
+                AND tl.TO_VALUE IN %s
                 AND tl.CREATED_DATE >= %s
-                AND (t.RESPONSIBLE_ID = %s OR t.ID IN (
-                    SELECT TASK_ID FROM b_tasks_member 
-                    WHERE USER_ID = %s AND TYPE = 'A'
-                ))
-            """, [year_ago[:10], user_id, user_id])
+                AND (
+                    t.RESPONSIBLE_ID = %s
+                    OR tl.TASK_ID IN (
+                        SELECT TASK_ID FROM b_tasks_member
+                        WHERE USER_ID = %s AND TYPE IN ('A', 'C')
+                    )
+                )
+            """, [DB_RETURN_STAGES, year_ago[:10], user_id, user_id])
             row = cursor.fetchone()
-            returns_tasks = int(row["cnt"]) if row else 0
-            returns_events = int(row["events"]) if row else 0
+            returns_tasks = int(row["cnt"]) if row and row["cnt"] else 0
+            returns_events = int(row["events"]) if row and row["events"] else 0
         conn.close()
     except Exception as e:
         returns_tasks = 0
