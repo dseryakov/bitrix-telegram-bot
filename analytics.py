@@ -299,6 +299,7 @@ def specialist_analytics(user_id: str) -> dict:
     acc_open = a_open.get("total", 0)
 
     # Возвраты из БД — поле STAGE с текстовыми названиями (как в db.py)
+    returns_db_error = None
     try:
         from db import get_connection, RETURN_STAGES as DB_RETURN_STAGES
         conn = get_connection()
@@ -325,6 +326,7 @@ def specialist_analytics(user_id: str) -> dict:
     except Exception as e:
         returns_tasks = 0
         returns_events = 0
+        returns_db_error = str(e)
 
     # Процентное соотношение
     resp_total = resp_closed + resp_open
@@ -352,6 +354,7 @@ def specialist_analytics(user_id: str) -> dict:
         },
         "returns_tasks": returns_tasks,
         "returns_events": returns_events,
+        "returns_db_error": returns_db_error,
     }
 
 
@@ -368,7 +371,10 @@ def get_specialists_list(role: str = "analyst", by_person: dict = None) -> list:
     result = []
     for name, info in by_person.items():
         uid = str(info.get("id", ""))
-        result.append({"id": uid, "name": name, "position": _user_cache.get(uid, "")})
+        # Исключаем случайных наблюдателей из других отделов (менее 3 задач)
+        if info.get("count", 0) < 3:
+            continue
+        result.append({"id": uid, "name": name, "position": _user_cache.get(uid, ""), "count": info.get("count", 0)})
     return sorted(result, key=lambda x: x["name"])
 
 def quick_analytics(group="ALL"):

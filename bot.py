@@ -655,6 +655,8 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
         f"Задач с возвратами: *{result['returns_tasks']}*\n"
         f"Всего возвратов: *{result['returns_events']}* раз\n"
     )
+    if result.get("returns_db_error"):
+        text += f"\n⚠️ _Ошибка БД: {result['returns_db_error']}_\n"
 
     keyboard = [
         [InlineKeyboardButton("🔙 К списку", callback_data=f"spec_role_{context.user_data.get('spec_role', 'analyst')}")],
