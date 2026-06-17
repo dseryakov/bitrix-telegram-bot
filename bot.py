@@ -436,6 +436,12 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
     t = result["tester"]
     analyzed = result.get("analyzed") or result.get("total_closed", 0)
 
+    # Сохраняем для меню "По специалисту" — только реальные участники группы
+    context.user_data["spec_by_person"] = {
+        "analyst": a.get("by_person", {}),
+        "tester": t.get("by_person", {}),
+    }
+
     def conclusion(a_or_t, role_name):
         wc = a_or_t["with_count"]
         woc = a_or_t["without_count"]
@@ -588,10 +594,14 @@ async def analytics_specialist_list(update: Update, context: ContextTypes.DEFAUL
     context.user_data["spec_role"] = role
 
     from analytics import get_specialists_list
-    specialists = get_specialists_list(role)
+    by_person = context.user_data.get("spec_by_person", {}).get(role, {})
+    specialists = get_specialists_list(role, by_person)
 
     if not specialists:
-        await query.edit_message_text("❌ Специалисты не найдены.")
+        await query.edit_message_text(
+            "❌ Специалисты не найдены в текущей выборке. Сначала выполните аналитику по группе.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="anal_specialist")]])
+        )
         return
 
     keyboard = []

@@ -189,7 +189,7 @@ def _process_tasks(tasks, return_counts=None):
 
             stats = analyst_stats if role == "analyst" else tester_stats
             if name not in stats:
-                stats[name] = {"days": [], "responsible": 0, "accomplice": 0, "auditor": 0, "returns": 0, "tasks_with_returns": 0}
+                stats[name] = {"id": uid, "days": [], "responsible": 0, "accomplice": 0, "auditor": 0, "returns": 0, "tasks_with_returns": 0}
             stats[name]["days"].append(days)
             stats[name][participation] += 1
             stats[name]["returns"] += returns
@@ -216,6 +216,7 @@ def _process_tasks(tasks, return_counts=None):
 
     analyst_by_person = {
         name: {
+            "id": s["id"],
             "count": len(s["days"]),
             "avg_days": _avg(s["days"]),
             "responsible": s["responsible"],
@@ -228,6 +229,7 @@ def _process_tasks(tasks, return_counts=None):
     }
     tester_by_person = {
         name: {
+            "id": s["id"],
             "count": len(s["days"]),
             "avg_days": _avg(s["days"]),
             "responsible": s["responsible"],
@@ -351,14 +353,20 @@ def specialist_analytics(user_id: str) -> dict:
     }
 
 
-def get_specialists_list(role: str = "analyst") -> list:
-    """Получить список специалистов нужной роли."""
+def get_specialists_list(role: str = "analyst", by_person: dict = None) -> list:
+    """Получить список специалистов нужной роли — только реальных участников группы.
+
+    by_person: словарь analyst_by_person/tester_by_person из результата
+    quick_analytics/full_analytics (имя -> {id, ...}). Если не передан,
+    возвращается пустой список (нет данных по группе).
+    """
     load_user_cache()
+    if not by_person:
+        return []
     result = []
-    for uid, pos in _user_cache.items():
-        if get_role(pos) == role:
-            name = _user_names.get(uid, f"ID {uid}")
-            result.append({"id": uid, "name": name, "position": pos})
+    for name, info in by_person.items():
+        uid = str(info.get("id", ""))
+        result.append({"id": uid, "name": name, "position": _user_cache.get(uid, "")})
     return sorted(result, key=lambda x: x["name"])
 
 def quick_analytics(group="ALL"):
