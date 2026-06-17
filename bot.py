@@ -635,8 +635,23 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
     r = result["responsible"]
     a = result["accomplice"]
 
-    resp_bar = "🟢" * (r["closed_pct"] // 20) + "⚪" * (5 - r["closed_pct"] // 20)
-    acc_bar = "🟢" * (a["closed_pct"] // 20) + "⚪" * (5 - a["closed_pct"] // 20)
+    def make_bar(pct):
+        """5 кружочков: 🔴 зона 0-20%, 🟡 зона 20-60%, 🟢 зона 60-100%."""
+        filled = pct // 20  # сколько кружочков закрашено (0-5)
+        circles = []
+        for i in range(5):
+            if i >= filled:
+                circles.append("⚪")
+            elif i == 0:
+                circles.append("🔴")
+            elif i <= 2:
+                circles.append("🟡")
+            else:
+                circles.append("🟢")
+        return "".join(circles)
+
+    resp_bar = make_bar(r["closed_pct"])
+    acc_bar = make_bar(a["closed_pct"])
 
     text = (
         f"👤 *{result['name']}*\n"
@@ -653,7 +668,8 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
         f"{acc_bar}\n\n"
         f"*🔄 Возвраты на доработку за год:*\n"
         f"Задач с возвратами: *{result['returns_tasks']}*\n"
-        f"Всего возвратов: *{result['returns_events']}* раз\n"
+        f"Всего событий возврата: *{result['returns_events']}* раз\n"
+        f"_(учитываются все задачи где специалист исполнитель/соисполнитель, включая уже закрытые)_\n"
     )
     if result.get("returns_db_error"):
         text += f"\n⚠️ _Ошибка БД: {result['returns_db_error']}_\n"
