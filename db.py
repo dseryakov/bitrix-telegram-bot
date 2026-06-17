@@ -59,7 +59,40 @@ def get_task_return_counts(task_ids: list) -> dict:
         return {}
 
 
-def get_group_return_stats(group_ids: list, year_ago: str) -> dict:
+def get_specialist_return_stats(user_id: str, year_ago: str) -> dict:
+    """
+    Получить статистику возвратов для конкретного специалиста за период.
+    user_id — строковый ID пользователя Битрикс24.
+    year_ago — дата в формате 'YYYY-MM-DD'.
+    Возвращает {'tasks': int, 'events': int}.
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT tl.TASK_ID) as tasks, COUNT(*) as events
+                FROM b_tasks_log tl
+                JOIN b_tasks t ON t.ID = tl.TASK_ID
+                WHERE tl.FIELD = 'STAGE'
+                AND tl.TO_VALUE IN %s
+                AND tl.CREATED_DATE >= %s
+                AND (
+                    t.RESPONSIBLE_ID = %s
+                    OR tl.TASK_ID IN (
+                        SELECT TASK_ID FROM b_tasks_member
+                        WHERE USER_ID = %s AND TYPE IN ('A', 'C')
+                    )
+                )
+            """, [RETURN_STAGES, year_ago, int(user_id), int(user_id)])
+            row = cursor.fetchone()
+        conn.close()
+        return {
+            'tasks': int(row['tasks']) if row and row['tasks'] else 0,
+            'events': int(row['events']) if row and row['events'] else 0,
+        }
+    except Exception as e:
+        print(f"DB error get_specialist_return_stats: {e}")
+        return {'tasks': 0, 'events': 0, 'error': str(e)}
     """
     Получить статистику возвратов по группам за период.
     Возвращает {task_id: return_count} для задач с возвратами.
