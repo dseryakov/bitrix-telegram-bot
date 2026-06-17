@@ -669,6 +669,20 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
         f"*🔄 Возвраты на доработку за год:*\n"
         f"Задач с возвратами: *{result['returns_tasks']}*\n"
         f"Всего событий возврата: *{result['returns_events']}* раз\n"
+    )
+
+    # Считаем проценты возвратов
+    rt = result['returns_tasks']
+    re_ = result['returns_events']
+    total_all = r['total'] + a['total']
+    pct_of_total = round(rt / total_all * 100, 1) if total_all > 0 else 0
+    pct_of_resp = round(rt / r['total'] * 100, 1) if r['total'] > 0 else 0
+    avg_per_task = round(re_ / rt, 2) if rt > 0 else 0
+
+    text += (
+        f"• % от всех задач: *{pct_of_total}%* ({rt} из {total_all})\n"
+        f"• % от задач как исполнитель: *{pct_of_resp}%* ({rt} из {r['total']})\n"
+        f"• Среднее возвратов на задачу: *{avg_per_task}* раз\n"
         f"_(учитываются все задачи где специалист исполнитель/соисполнитель, включая уже закрытые)_\n"
     )
     if result.get("returns_db_error"):
