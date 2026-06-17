@@ -653,6 +653,18 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
     resp_bar = make_bar(r["closed_pct"])
     acc_bar = make_bar(a["closed_pct"])
 
+    # Совместное участие с разработчиками
+    collab_tasks = result.get('collab_tasks', 0)
+    collab_total = result.get('collab_total', 0)
+    collab_pct = round(collab_tasks / collab_total * 100, 1) if collab_total > 0 else 0
+
+    # Списанные часы
+    user_minutes = result.get('user_minutes', 0)
+    total_minutes = result.get('total_minutes', 0)
+    user_hours = round(user_minutes / 60, 1)
+    hours_pct = round(user_minutes / total_minutes * 100, 1) if total_minutes > 0 else 0
+    total_hours = round(total_minutes / 60, 1)
+
     text = (
         f"👤 *{result['name']}*\n"
         f"_{result['position']}_\n\n"
@@ -666,6 +678,12 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
         f"✅ Закрытых: *{a['closed']}* ({a['closed_pct']}%)\n"
         f"⏳ Активных: *{a['open']}*\n"
         f"{acc_bar}\n\n"
+        f"*👨‍💻 Совместные задачи с разработчиками:*\n"
+        f"Задач с разработчиком: *{collab_tasks}* из {collab_total} ({collab_pct}%)\n\n"
+        f"*⏱ Списанное время за год:*\n"
+        f"Специалист списал: *{user_hours} ч*\n"
+        f"Все участники задач: *{total_hours} ч*\n"
+        f"Доля специалиста: *{hours_pct}%*\n\n"
         f"*🔄 Возвраты на доработку за год:*\n"
         f"Задач с возвратами: *{result['returns_tasks']}*\n"
         f"Всего событий возврата: *{result['returns_events']}* раз\n"

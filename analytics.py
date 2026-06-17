@@ -18,7 +18,7 @@ RETURN_STAGES = [9705, 13613, 17892, 17893]
 PROBLEM_KEYWORDS = ["баг", "bug", "ошибка", "проблема", "не работает", "сломал", "критич"]
 ROLE_KEYWORDS = {
     "analyst":   ["аналитик"],
-    "developer": ["программист", "разработч", "инженер", "teamlead", "team lead"],
+    "developer": ["программист", "разработч", "инженер", "teamlead", "team lead", "руководитель отдела разработки", "начальник отдела разработки"],
     "tester":    ["тестировщик", "тестер", "qa"],
 }
 
@@ -301,15 +301,20 @@ def specialist_analytics(user_id: str) -> dict:
     # Возвраты из БД
     returns_db_error = None
     try:
-        from db import get_specialist_return_stats
+        from db import get_specialist_return_stats, get_specialist_collab_stats, get_specialist_hours_stats
         ret = get_specialist_return_stats(str(user_id), year_ago[:10])
         returns_tasks = ret['tasks']
         returns_events = ret['events']
         returns_db_error = ret.get('error')
+
+        collab = get_specialist_collab_stats(str(user_id), year_ago[:10])
+        hours = get_specialist_hours_stats(str(user_id), year_ago[:10])
     except Exception as e:
         returns_tasks = 0
         returns_events = 0
         returns_db_error = str(e)
+        collab = {'collab_tasks': 0, 'total_tasks': 0}
+        hours = {'user_minutes': 0, 'total_minutes': 0}
 
     # Процентное соотношение
     resp_total = resp_closed + resp_open
@@ -338,6 +343,12 @@ def specialist_analytics(user_id: str) -> dict:
         "returns_tasks": returns_tasks,
         "returns_events": returns_events,
         "returns_db_error": returns_db_error,
+        "collab_tasks": collab.get('collab_tasks', 0),
+        "collab_total": collab.get('total_tasks', 0),
+        "collab_error": collab.get('error'),
+        "user_minutes": hours.get('user_minutes', 0),
+        "total_minutes": hours.get('total_minutes', 0),
+        "hours_error": hours.get('error'),
     }
 
 
