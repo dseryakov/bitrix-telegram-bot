@@ -1,0 +1,11 @@
+stages:
+  - deploy
+
+deploy:
+  stage: deploy
+  tags:
+    - deploy
+  script:
+    - bash /home/d.seryakov/deploy.sh
+  only:
+    - main
