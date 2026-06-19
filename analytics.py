@@ -159,6 +159,7 @@ def _process_tasks(tasks, return_counts=None):
     with_tester, without_tester = [], []
     analyst_stats = {}
     tester_stats = {}
+    developer_stats = {}
 
     for t in tasks:
         roles = get_participant_roles(t)
@@ -177,7 +178,7 @@ def _process_tasks(tasks, return_counts=None):
             role = get_role(pos)
             name = _user_names.get(uid, f"ID {uid}")
 
-            if role not in ("analyst", "tester"):
+            if role not in ("analyst", "tester", "developer"):
                 continue
 
             if uid == responsible_id:
@@ -187,7 +188,12 @@ def _process_tasks(tasks, return_counts=None):
             else:
                 participation = "auditor"
 
-            stats = analyst_stats if role == "analyst" else tester_stats
+            if role == "analyst":
+                stats = analyst_stats
+            elif role == "tester":
+                stats = tester_stats
+            else:
+                stats = developer_stats
             if name not in stats:
                 stats[name] = {"id": uid, "days": [], "responsible": 0, "accomplice": 0, "auditor": 0, "returns": 0, "tasks_with_returns": 0}
             stats[name]["days"].append(days)
@@ -240,6 +246,19 @@ def _process_tasks(tasks, return_counts=None):
         }
         for name, s in sorted(tester_stats.items(), key=lambda x: -len(x[1]["days"]))
     }
+    developer_by_person = {
+        name: {
+            "id": s["id"],
+            "count": len(s["days"]),
+            "avg_days": _avg(s["days"]),
+            "responsible": s["responsible"],
+            "accomplice": s["accomplice"],
+            "auditor": s["auditor"],
+            "returns": s["returns"],
+            "tasks_with_returns": s["tasks_with_returns"],
+        }
+        for name, s in sorted(developer_stats.items(), key=lambda x: -len(x[1]["days"]))
+    }
 
     return {
         "analyst": {
@@ -257,6 +276,9 @@ def _process_tasks(tasks, return_counts=None):
             "without_avg_days": _avg(without_tester),
             "faster_pct": tester_diff,
             "by_person": tester_by_person,
+        },
+        "developer": {
+            "by_person": developer_by_person,
         },
     }
 
@@ -301,13 +323,17 @@ def specialist_analytics(user_id: str) -> dict:
     # Возвраты из БД
     returns_db_error = None
     try:
-        from db import get_specialist_return_stats, get_specialist_collab_stats, get_specialist_hours_stats
+        from db import get_specialist_return_stats, get_specialist_collab_stats, get_specialist_hours_stats, ANALYST_TESTER_KEYWORDS
         ret = get_specialist_return_stats(str(user_id), year_ago[:10])
         returns_tasks = ret['tasks']
         returns_events = ret['events']
         returns_db_error = ret.get('error')
 
-        collab = get_specialist_collab_stats(str(user_id), year_ago[:10])
+        # Для разработчика считаем совместность с аналитиками/тестировщиками,
+        # для аналитика/тестировщика — по умолчанию (с разработчиками)
+        my_role = get_role(position)
+        collab_keywords = ANALYST_TESTER_KEYWORDS if my_role == "developer" else None
+        collab = get_specialist_collab_stats(str(user_id), year_ago[:10], collab_keywords)
         hours = get_specialist_hours_stats(str(user_id), year_ago[:10])
     except Exception as e:
         returns_tasks = 0

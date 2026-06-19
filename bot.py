@@ -434,12 +434,14 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
 
     a = result["analyst"]
     t = result["tester"]
+    d = result.get("developer", {"by_person": {}})
     analyzed = result.get("analyzed") or result.get("total_closed", 0)
 
     # Сохраняем для меню "По специалисту" — только реальные участники группы
     context.user_data["spec_by_person"] = {
         "analyst": a.get("by_person", {}),
         "tester": t.get("by_person", {}),
+        "developer": d.get("by_person", {}),
     }
 
     def conclusion(a_or_t, role_name):
@@ -583,6 +585,7 @@ async def analytics_specialist_role(update: Update, context: ContextTypes.DEFAUL
             InlineKeyboardButton("👨‍💼 Аналитики", callback_data="spec_role_analyst"),
             InlineKeyboardButton("🧪 Тестировщики", callback_data="spec_role_tester"),
         ],
+        [InlineKeyboardButton("👨‍💻 Разработчики", callback_data="spec_role_developer")],
         [InlineKeyboardButton("🔙 Назад", callback_data="anal_back")],
     ]
     await query.edit_message_text("Выбери роль специалиста:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -653,7 +656,9 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
     resp_bar = make_bar(r["closed_pct"])
     acc_bar = make_bar(a["closed_pct"])
 
-    # Совместное участие с разработчиками
+    # Совместное участие — заголовок зависит от роли специалиста
+    spec_role = context.user_data.get('spec_role', 'analyst')
+    collab_label = "с аналитиком/тестировщиком" if spec_role == "developer" else "с разработчиком"
     collab_tasks = result.get('collab_tasks', 0)
     collab_total = result.get('collab_total', 0)
     collab_pct = round(collab_tasks / collab_total * 100, 1) if collab_total > 0 else 0
@@ -678,8 +683,8 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
         f"✅ Закрытых: *{a['closed']}* ({a['closed_pct']}%)\n"
         f"⏳ Активных: *{a['open']}*\n"
         f"{acc_bar}\n\n"
-        f"*👨‍💻 Совместные задачи с разработчиками:*\n"
-        f"Задач с разработчиком: *{collab_tasks}* из {collab_total} ({collab_pct}%)\n\n"
+        f"*👥 Совместные задачи {collab_label}:*\n"
+        f"Задач: *{collab_tasks}* из {collab_total} ({collab_pct}%)\n\n"
         f"*⏱ Списанное время за год:*\n"
         f"Специалист списал: *{user_hours} ч*\n"
         f"Все участники задач: *{total_hours} ч*\n"
