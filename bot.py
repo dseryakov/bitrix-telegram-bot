@@ -195,34 +195,37 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    lines = [f"{filter_label} — *{group_label}* ({len(task_list)}):\n"]
-    for t in task_list:
-        status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
-        title = t.get("title", "Без названия")
-        deadline = t.get("deadline", "")
-        deadline_str = f"\n   ⏰ Дедлайн: {deadline[:10]}" if deadline else "\n   ⏰ Дедлайн: не указан"
-        responsible_name = t.get("responsible_name", "Не указан")
-        time_spent = int(t.get("time_spent_seconds", 0) or 0)
-        hours = time_spent // 3600
-        minutes = (time_spent % 3600) // 60
-        time_str = f"\n   ⏱ Списано: {hours}ч {minutes}мин"
-        task_id = t.get("id", "")
-        task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
-        lines.append(f"• *{title}*\n   {status}\n   👤 {responsible_name}{deadline_str}{time_str}\n   [Ссылка]({task_url})\n")
-
-    # Статистика по ответственным
-    stats = {}
+    # Группируем задачи по исполнителю
+    by_responsible = {}
     for t in task_list:
         name = t.get("responsible_name", "Не указан")
-        stats[name] = stats.get(name, 0) + 1
-    
-    stats_lines = ["\n\n📊 *Задач по специалистам:*"]
-    for name, count in sorted(stats.items(), key=lambda x: -x[1]):
-        stats_lines.append(f"   👤 {name}: *{count}*")
+        if name not in by_responsible:
+            by_responsible[name] = []
+        by_responsible[name].append(t)
+
+    # Сортируем по количеству задач (сначала у кого больше)
+    sorted_responsible = sorted(by_responsible.items(), key=lambda x: -len(x[1]))
+
+    lines = [f"{filter_label} — *{group_label}* ({len(task_list)}):\n"]
+    for name, tasks in sorted_responsible:
+        lines.append(f"👤 *{name}* ({len(tasks)})")
+        for t in tasks:
+            status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
+            title = t.get("title", "Без названия")
+            deadline = t.get("deadline", "")
+            deadline_str = f"⏰ {deadline[:10]}" if deadline else "⏰ не указан"
+            time_spent = int(t.get("time_spent_seconds", 0) or 0)
+            hours = time_spent // 3600
+            minutes = (time_spent % 3600) // 60
+            time_str = f"⏱ {hours}ч {minutes}мин"
+            task_id = t.get("id", "")
+            task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
+            lines.append(f"• [{title}]({task_url})\n   {status} | {deadline_str} | {time_str}")
+        lines.append("")
+
     text = "\n".join(lines)
-    if len(text) > 3900:
-        text = text[:3900] + "\n\n_...показаны первые задачи_"
-    text = text + "\n".join(stats_lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n_...показаны первые задачи_"
 
     keyboard = [[InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="back_to_groups")]]
     try:
