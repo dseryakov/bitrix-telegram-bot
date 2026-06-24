@@ -232,3 +232,61 @@ def get_specialist_hours_stats(user_id: str, year_ago: str) -> dict:
     except Exception as e:
         print(f"DB error get_specialist_hours_stats: {e}")
         return {'user_minutes': 0, 'total_minutes': 0, 'error': str(e)}
+
+
+def get_tasks_db(group_ids: list, filter_type: str = "important") -> list:
+    """
+    Быстрый список задач напрямую из MySQL — замена REST tasks.task.list + цикл комментариев.
+    filter_type: "important" — приоритет=2, статус активный (1,2,3)
+                 "overdue"   — приоритет=2, статус=5 (просрочено по дедлайну)
+    Возвращает список словарей с полями id, title, status, deadline, responsible_name,
+    responsible_id, time_spent_seconds.
+    """
+    placeholders = ','.join(['%s'] * len(group_ids))
+
+    if filter_type == "overdue":
+        status_condition = "t.STATUS = 5"
+    else:
+        status_condition = "t.STATUS IN (1, 2, 3)"
+
+    query = f"""
+        SELECT
+            t.ID as id,
+            t.TITLE as title,
+            t.STATUS as status,
+            t.DEADLINE as deadline,
+            t.RESPONSIBLE_ID as responsible_id,
+            CONCAT(COALESCE(u.NAME, ''), ' ', COALESCE(u.LAST_NAME, '')) as responsible_name,
+            COALESCE(SUM(e.MINUTES), 0) * 60 as time_spent_seconds
+        FROM b_tasks t
+        LEFT JOIN b_user u ON u.ID = t.RESPONSIBLE_ID
+        LEFT JOIN b_tasks_elapsed_time e ON e.TASK_ID = t.ID
+        WHERE t.GROUP_ID IN ({placeholders})
+        AND t.PRIORITY = 2
+        AND {status_condition}
+        GROUP BY t.ID, t.TITLE, t.STATUS, t.DEADLINE, t.RESPONSIBLE_ID, u.NAME, u.LAST_NAME
+        ORDER BY t.DEADLINE ASC
+        LIMIT 50
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute(query, group_ids)
+            rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            deadline = row['deadline'].strftime('%Y-%m-%dT%H:%M:%S') if row['deadline'] else ''
+            result.append({
+                'id': str(row['id']),
+                'title': row['title'] or 'Без названия',
+                'status': str(row['status']),
+                'deadline': deadline,
+                'responsible_id': str(row['responsible_id']) if row['responsible_id'] else '',
+                'responsible_name': (row['responsible_name'] or '').strip() or 'Не указан',
+                'time_spent_seconds': int(row['time_spent_seconds'] or 0),
+            })
+        return result
+    except Exception as e:
+        print(f"DB error get_tasks_db: {e}")
+        return []

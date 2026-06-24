@@ -53,19 +53,12 @@ def _call(method, params=None):
 
 def get_tasks(group="ALL", filter_type="important", user_id="72721"):
     group_ids = ALL_GROUP_IDS if group == "ALL" else GROUPS.get(group, ALL_GROUP_IDS)
-    if filter_type == "overdue":
-        f = {"GROUP_ID": group_ids, "PRIORITY": "2", "STATUS": "5"}
-    else:
-        f = {"GROUP_ID": group_ids, "PRIORITY": "2", "STATUS": [1, 2, 3]}
-    data = _call("tasks.task.list", {
-        "filter": f,
-    "select": ["ID", "TITLE", "STATUS", "DEADLINE", "GROUP_ID", "RESPONSIBLE_ID", "TIME_SPENT_IN_LOGS", "RESPONSIBLE"],
-        "order": {"DEADLINE": "ASC"},
-        "limit": 50,
-    })
-    if "error" in data:
-        return {"success": False, "error": data["error"]}
-    return {"success": True, "tasks": data.get("result", {}).get("tasks", [])}
+    try:
+        from db import get_tasks_db
+        tasks = get_tasks_db(group_ids, filter_type)
+        return {"success": True, "tasks": tasks}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def get_last_comment(task_id: str) -> str:
     """Получить последний комментарий к задаче."""

@@ -201,22 +201,19 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = t.get("title", "Без названия")
         deadline = t.get("deadline", "")
         deadline_str = f"\n   ⏰ Дедлайн: {deadline[:10]}" if deadline else "\n   ⏰ Дедлайн: не указан"
-        responsible_id = t.get("responsibleId", "")
-        responsible_name = t.get("responsible", {}).get("name", "Не указан") if isinstance(t.get("responsible"), dict) else "Не указан"
-        time_spent = int(t.get("timeSpentInLogs", 0) or 0)
+        responsible_name = t.get("responsible_name", "Не указан")
+        time_spent = int(t.get("time_spent_seconds", 0) or 0)
         hours = time_spent // 3600
         minutes = (time_spent % 3600) // 60
         time_str = f"\n   ⏱ Списано: {hours}ч {minutes}мин"
         task_id = t.get("id", "")
         task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
-        last_comment = get_last_comment(task_id)
-        comment_str = f"\n   💬 {last_comment}" if last_comment else ""
-        lines.append(f"• *{title}*\n   {status}\n   👤 {responsible_name}{deadline_str}{time_str}{comment_str}\n   [Ссылка]({task_url})\n")
+        lines.append(f"• *{title}*\n   {status}\n   👤 {responsible_name}{deadline_str}{time_str}\n   [Ссылка]({task_url})\n")
 
     # Статистика по ответственным
     stats = {}
     for t in task_list:
-        name = t.get("responsible", {}).get("name", "Не указан") if isinstance(t.get("responsible"), dict) else "Не указан"
+        name = t.get("responsible_name", "Не указан")
         stats[name] = stats.get(name, 0) + 1
     
     stats_lines = ["\n\n📊 *Задач по специалистам:*"]
