@@ -166,14 +166,12 @@ async def group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Шаг 3 — загрузить и показать задачи."""
+    """Шаг 3 — сводка по сотрудникам с кнопками."""
     query = update.callback_query
     await query.answer()
- 
 
     filter_type = query.data.replace("filter_", "")
     group = context.user_data.get("group", "ALL")
-
     group_label = group if group != "ALL" else "Все группы"
     filter_label = "🔥 Важные" if filter_type == "important" else "🔴 Важные просроченные"
 
@@ -195,39 +193,100 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Группируем задачи по исполнителю
+    # Сохраняем задачи и контекст для детального просмотра
+    context.user_data["task_list"] = task_list
+    context.user_data["filter_label"] = filter_label
+    context.user_data["group_label"] = group_label
+    context.user_data["filter_type"] = filter_type
+
+    # Группируем по исполнителю
     by_responsible = {}
     for t in task_list:
         name = t.get("responsible_name", "Не указан")
         if name not in by_responsible:
-            by_responsible[name] = []
-        by_responsible[name].append(t)
+            by_responsible[name] = {"tasks": [], "hours": 0}
+        by_responsible[name]["tasks"].append(t)
+        by_responsible[name]["hours"] += int(t.get("time_spent_seconds", 0) or 0)
 
-    # Сортируем по количеству задач (сначала у кого больше)
-    sorted_responsible = sorted(by_responsible.items(), key=lambda x: -len(x[1]))
+    sorted_responsible = sorted(by_responsible.items(), key=lambda x: -len(x[1]["tasks"]))
 
-    lines = [f"{filter_label} — *{group_label}* ({len(task_list)}):\n"]
-    for name, tasks in sorted_responsible:
-        lines.append(f"👤 *{name}* ({len(tasks)})")
-        for t in tasks:
-            status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
-            title = t.get("title", "Без названия")
-            deadline = t.get("deadline", "")
-            deadline_str = f"⏰ {deadline[:10]}" if deadline else "⏰ не указан"
-            time_spent = int(t.get("time_spent_seconds", 0) or 0)
-            hours = time_spent // 3600
-            minutes = (time_spent % 3600) // 60
-            time_str = f"⏱ {hours}ч {minutes}мин"
-            task_id = t.get("id", "")
-            task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
-            lines.append(f"• [{title}]({task_url})\n   {status} | {deadline_str} | {time_str}")
-        lines.append("")
+    # Строим сводку
+    lines = [f"{filter_label} — *{group_label}* ({len(task_list)} задач):\n"]
+    for name, data in sorted_responsible:
+        count = len(data["tasks"])
+        hours = data["hours"] // 3600
+        minutes = (data["hours"] % 3600) // 60
+        # Короткое имя (Фамилия И.О.)
+        parts = name.split()
+        short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
+        lines.append(f"👤 *{short}* — {count} задач | ⏱ {hours}ч {minutes}мин")
+
+    text = "\n".join(lines)
+
+    # Кнопки по каждому сотруднику (короткое имя)
+    keyboard = []
+    row = []
+    for i, (name, data) in enumerate(sorted_responsible):
+        parts = name.split()
+        short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
+        # Сохраняем индекс сотрудника как callback
+        row.append(InlineKeyboardButton(short, callback_data=f"tasks_person_{i}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="back_to_groups")])
+
+    # Сохраняем порядок сотрудников
+    context.user_data["tasks_persons"] = [name for name, _ in sorted_responsible]
+
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*", ""), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def tasks_person_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Детальный список задач по конкретному сотруднику."""
+    query = update.callback_query
+    await query.answer()
+
+    idx = int(query.data.replace("tasks_person_", ""))
+    persons = context.user_data.get("tasks_persons", [])
+    task_list = context.user_data.get("task_list", [])
+    filter_label = context.user_data.get("filter_label", "")
+    group_label = context.user_data.get("group_label", "")
+
+    if idx >= len(persons):
+        await query.edit_message_text("❌ Данные устарели, запросите задачи заново.")
+        return
+
+    name = persons[idx]
+    person_tasks = [t for t in task_list if t.get("responsible_name") == name]
+
+    lines = [f"{filter_label} — *{group_label}*\n👤 *{name}* ({len(person_tasks)}):\n"]
+    for t in person_tasks:
+        status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
+        title = t.get("title", "Без названия")
+        deadline = t.get("deadline", "")
+        deadline_str = f"⏰ {deadline[:10]}" if deadline else "⏰ не указан"
+        time_spent = int(t.get("time_spent_seconds", 0) or 0)
+        hours = time_spent // 3600
+        minutes = (time_spent % 3600) // 60
+        time_str = f"⏱ {hours}ч {minutes}мин"
+        task_id = t.get("id", "")
+        task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
+        lines.append(f"• [{title}]({task_url})\n   {status} | {deadline_str} | {time_str}")
 
     text = "\n".join(lines)
     if len(text) > 4000:
-        text = text[:4000] + "\n\n_...показаны первые задачи_"
+        text = text[:4000] + "\n\n_...список обрезан_"
 
-    keyboard = [[InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="back_to_groups")]]
+    keyboard = [
+        [InlineKeyboardButton("🔙 Назад к сводке", callback_data=f"filter_{context.user_data.get('filter_type', 'important')}")],
+        [InlineKeyboardButton("🔄 Выбрать другую группу", callback_data="back_to_groups")],
+    ]
     try:
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
@@ -772,6 +831,7 @@ def main():
     app.add_handler(CommandHandler("calendar", calendar))
     app.add_handler(CallbackQueryHandler(group_callback, pattern="^group_"))
     app.add_handler(CallbackQueryHandler(filter_callback, pattern="^filter_"))
+    app.add_handler(CallbackQueryHandler(tasks_person_callback, pattern="^tasks_person_"))
     app.add_handler(CallbackQueryHandler(back_to_groups, pattern="^back_to_groups$"))
     app.add_handler(CallbackQueryHandler(calendar_callback, pattern="^cal_"))
     app.add_handler(meeting_handler)
