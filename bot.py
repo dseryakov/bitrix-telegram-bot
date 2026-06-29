@@ -231,7 +231,18 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         minutes = (data["hours"] % 3600) // 60
         parts = name.split()
         short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
-        lines.append(f"👤 *{short}* — {count} задач | ⏱ {hours}ч {minutes}мин")
+
+        # Топ-3 тега сотрудника
+        person_tag_counts = {}
+        for t in data["tasks"]:
+            for tag in t.get("tags", []):
+                person_tag_counts[tag] = person_tag_counts.get(tag, 0) + 1
+        top3 = sorted(person_tag_counts.items(), key=lambda x: -x[1])[:3]
+        tags_str = ""
+        if top3:
+            tags_str = "\n   🏷 " + ", ".join(f"{tag} ({cnt})" for tag, cnt in top3)
+
+        lines.append(f"👤 *{short}* — {count} задач | ⏱ {hours}ч {minutes}мин{tags_str}")
 
     if top_tags:
         lines.append("\n🏷 *Топ тегов:*")
