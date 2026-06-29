@@ -21,7 +21,7 @@ from telegram.ext import (
     ConversationHandler, MessageHandler, filters, ContextTypes
 )
 
-from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment, find_user_by_email, send_verification_code
+from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment, find_user_by_email, send_verification_code, get_task_tags
 from config import TELEGRAM_TOKEN
 from users import get_bitrix_user, register_user
 logging.basicConfig(
@@ -193,6 +193,12 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Обогащаем задачи тегами через Portal API
+    task_ids = [t["id"] for t in task_list]
+    tags_map = get_task_tags(task_ids)
+    for t in task_list:
+        t["tags"] = tags_map.get(str(t["id"]), [])
+
     # Сохраняем задачи и контекст для детального просмотра
     context.user_data["task_list"] = task_list
     context.user_data["filter_label"] = filter_label
@@ -210,16 +216,27 @@ async def filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sorted_responsible = sorted(by_responsible.items(), key=lambda x: -len(x[1]["tasks"]))
 
+    # Топ-теги по группе
+    tag_counts = {}
+    for t in task_list:
+        for tag in t.get("tags", []):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:5]
+
     # Строим сводку
     lines = [f"{filter_label} — *{group_label}* ({len(task_list)} задач):\n"]
     for name, data in sorted_responsible:
         count = len(data["tasks"])
         hours = data["hours"] // 3600
         minutes = (data["hours"] % 3600) // 60
-        # Короткое имя (Фамилия И.О.)
         parts = name.split()
         short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
         lines.append(f"👤 *{short}* — {count} задач | ⏱ {hours}ч {minutes}мин")
+
+    if top_tags:
+        lines.append("\n🏷 *Топ тегов:*")
+        for tag, cnt in top_tags:
+            lines.append(f"   • {tag} — {cnt}")
 
     text = "\n".join(lines)
 
@@ -280,7 +297,9 @@ async def tasks_person_callback(update: Update, context: ContextTypes.DEFAULT_TY
         time_str = f"⏱ {hours}ч {minutes}мин"
         task_id = t.get("id", "")
         task_url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
-        lines.append(f"• [{title}]({task_url})\n   {status} | {deadline_str} | {time_str}")
+        tags = t.get("tags", [])
+        tags_str = f"\n   🏷 {', '.join(tags)}" if tags else ""
+        lines.append(f"• [{title}]({task_url})\n   {status} | {deadline_str} | {time_str}{tags_str}")
 
     text = "\n".join(lines)
     if len(text) > 4000:

@@ -1,7 +1,10 @@
 import requests
 import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from config import BITRIX_WEBHOOK_URL
+
+load_dotenv()
 
 os.environ.pop("HTTP_PROXY", None)
 os.environ.pop("HTTPS_PROXY", None)
@@ -10,12 +13,45 @@ os.environ.pop("http_proxy", None)
 os.environ.pop("https_proxy", None)
 os.environ.pop("all_proxy", None)
 
+PORTAL_API_URL = "https://mfportal.by/site_api/v1"
+PORTAL_API_LOGIN = os.getenv("PORTAL_API_LOGIN", "")
+PORTAL_API_PASSWORD = os.getenv("PORTAL_API_PASSWORD", "")
+
 GROUPS = {
     "WEB":          [328],
     "1С":           [342],
     "ПРОИЗВОДСТВО": [527, 353],
 }
 ALL_GROUP_IDS = [328, 342, 527, 353]
+
+def get_task_tags(task_ids: list) -> dict:
+    """
+    Получить теги для списка задач через Portal API.
+    Возвращает {task_id: [tag1, tag2, ...]} или {} при ошибке.
+    """
+    if not task_ids or not PORTAL_API_LOGIN:
+        return {}
+    # Батчи по 50 задач
+    result = {}
+    for i in range(0, len(task_ids), 50):
+        batch = task_ids[i:i+50]
+        try:
+            r = requests.post(
+                f"{PORTAL_API_URL}/tasks/tags/",
+                json={"task_ids": [int(tid) for tid in batch]},
+                auth=(PORTAL_API_LOGIN, PORTAL_API_PASSWORD),
+                timeout=10,
+                proxies={"http": None, "https": None},
+            )
+            r.raise_for_status()
+            data = r.json()
+            if data.get("success"):
+                for tid, tags in data.get("tasks", {}).items():
+                    result[str(tid)] = tags
+        except Exception as e:
+            print(f"Portal API error get_task_tags: {e}")
+    return result
+
 
 def find_user_by_email(email: str) -> dict:
     """Найти пользователя Битрикс24 по email."""
