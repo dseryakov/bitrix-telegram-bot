@@ -53,7 +53,7 @@ def load_user_cache():
     start = 0
     while True:
         data = _call("user.get", {
-            "select": ["ID", "NAME", "LAST_NAME", "WORK_POSITION"],
+            "select": ["ID", "NAME", "LAST_NAME", "SECOND_NAME", "WORK_POSITION"],
             "start": start,
         })
         users = data.get("result", [])
@@ -62,7 +62,10 @@ def load_user_cache():
         for u in users:
             uid = str(u["ID"])
             _user_cache[uid] = u.get("WORK_POSITION") or ""
-            _user_names[uid] = f"{u.get('NAME', '')} {u.get('LAST_NAME', '')}".strip()
+            last = u.get('LAST_NAME', '').strip()
+            first = u.get('NAME', '').strip()
+            # Фамилия Имя (без отчества — для краткости в кнопках)
+            _user_names[uid] = f"{last} {first}".strip() if last else first
         total = data.get("total", 0)
         start += 50
         if start >= total:
