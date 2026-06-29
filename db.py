@@ -239,7 +239,7 @@ def get_tasks_db(group_ids: list, filter_type: str = "important") -> list:
     Быстрый список задач напрямую из MySQL — замена REST tasks.task.list + цикл комментариев.
     filter_type: "important" — приоритет=2, статус активный (1,2,3)
                  "overdue"   — приоритет=2, статус=5 (просрочено по дедлайну)
-    Возвращает список словарей с полями id, title, status, deadline, responsible_name,
+    Возвращает список словарей с полями id, title, stage_name, deadline, responsible_name,
     responsible_id, time_spent_seconds.
     """
     placeholders = ','.join(['%s'] * len(group_ids))
@@ -254,17 +254,19 @@ def get_tasks_db(group_ids: list, filter_type: str = "important") -> list:
             t.ID as id,
             t.TITLE as title,
             t.STATUS as status,
+            COALESCE(s.TITLE, '') as stage_name,
             t.DEADLINE as deadline,
             t.RESPONSIBLE_ID as responsible_id,
             CONCAT(COALESCE(u.NAME, ''), ' ', COALESCE(u.LAST_NAME, '')) as responsible_name,
             COALESCE(SUM(e.MINUTES), 0) * 60 as time_spent_seconds
         FROM b_tasks t
         LEFT JOIN b_user u ON u.ID = t.RESPONSIBLE_ID
+        LEFT JOIN b_tasks_stages s ON s.ID = t.STAGE_ID
         LEFT JOIN b_tasks_elapsed_time e ON e.TASK_ID = t.ID
         WHERE t.GROUP_ID IN ({placeholders})
         AND t.PRIORITY = 2
         AND {status_condition}
-        GROUP BY t.ID, t.TITLE, t.STATUS, t.DEADLINE, t.RESPONSIBLE_ID, u.NAME, u.LAST_NAME
+        GROUP BY t.ID, t.TITLE, t.STATUS, s.TITLE, t.DEADLINE, t.RESPONSIBLE_ID, u.NAME, u.LAST_NAME
         ORDER BY t.DEADLINE ASC
         LIMIT 50
     """
@@ -281,6 +283,7 @@ def get_tasks_db(group_ids: list, filter_type: str = "important") -> list:
                 'id': str(row['id']),
                 'title': row['title'] or 'Без названия',
                 'status': str(row['status']),
+                'stage_name': row['stage_name'] or '',
                 'deadline': deadline,
                 'responsible_id': str(row['responsible_id']) if row['responsible_id'] else '',
                 'responsible_name': (row['responsible_name'] or '').strip() or 'Не указан',

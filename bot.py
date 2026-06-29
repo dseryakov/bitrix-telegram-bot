@@ -267,7 +267,10 @@ async def tasks_person_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     lines = [f"{filter_label} — *{group_label}*\n👤 *{name}* ({len(person_tasks)}):\n"]
     for t in person_tasks:
-        status = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
+        stage_name = t.get("stage_name", "")
+        if not stage_name:
+            stage_name = STATUS_LABELS.get(str(t.get("status", "1")), "❓")
+        status = stage_name
         title = t.get("title", "Без названия")
         deadline = t.get("deadline", "")
         deadline_str = f"⏰ {deadline[:10]}" if deadline else "⏰ не указан"
