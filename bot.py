@@ -514,7 +514,8 @@ async def tp_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📋 В работе", callback_data="tp_report_active")],
         [InlineKeyboardButton("🔴 Просроченные", callback_data="tp_report_overdue")],
-        [InlineKeyboardButton("⏰ Долгие (>7 дней) + нераспред. (>2 дней)", callback_data="tp_report_long")],
+        [InlineKeyboardButton("⏰ Долгие (>7 дней)", callback_data="tp_report_long")],
+        [InlineKeyboardButton("📥 Нераспределённые (>2 дней)", callback_data="tp_report_unassigned")],
         [InlineKeyboardButton("🔙 Назад", callback_data="anal_ТП")],
     ]
     await query.edit_message_text(
@@ -547,26 +548,26 @@ async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         tasks = get_tp_overdue(user_ids)
         report_label = "🔴 Просроченные"
     elif report_type == "long":
-        long_tasks = get_tp_long(user_ids, days=7)
-        unassigned = get_tp_unassigned(days=2)
-        # Объединяем для показа по сотрудникам
-        tasks = long_tasks
+        tasks = get_tp_long(user_ids, days=7)
         report_label = "⏰ Долгие (>7 дней)"
+    elif report_type == "unassigned":
+        tasks = get_tp_unassigned(days=2)
+        report_label = "📥 Нераспределённые (>2 дней)"
     else:
         await query.edit_message_text("❌ Неизвестный тип отчёта.")
         return
 
     if report_type == "long":
-        # Для долгих показываем два блока: по сотрудникам + нераспределённые
+        # Для долгих показываем по сотрудникам
         by_person = {}
-        for t in long_tasks:
+        for t in tasks:
             name = t.get("responsible_name", "Не указан")
             if name not in by_person:
                 by_person[name] = []
             by_person[name].append(t)
         sorted_persons = sorted(by_person.items(), key=lambda x: -len(x[1]))
 
-        lines = [f"⏰ *{label}*\n*В работе >7 дней ({len(long_tasks)}):*\n"]
+        lines = [f"⏰ *{label}*\n*В работе >7 дней ({len(tasks)}):*\n"]
         for name, ptasks in sorted_persons:
             parts = name.split()
             short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
@@ -583,20 +584,6 @@ async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 deadline = t.get("deadline", "")[:10] if t.get("deadline") else "не указан"
                 lines.append(f"   • [{t['title']}]({url})\n     {stage} | {days_in} дн. | ⏰ {deadline}")
 
-        lines.append(f"\n*Нераспределённые >2 дней ({len(unassigned)}):*")
-        if unassigned:
-            for t in unassigned:
-                from datetime import datetime
-                try:
-                    days_in = (datetime.now() - datetime.fromisoformat(t["created_date"])).days
-                except Exception:
-                    days_in = 0
-                tid = t.get("id", "")
-                url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{tid}/"
-                lines.append(f"   • [{t['title']}]({url}) — {days_in} дн.")
-        else:
-            lines.append("_Нет таких заявок_")
-
         text = "\n".join(lines)
         if len(text) > 4000:
             text = text[:4000] + "\n\n_...список обрезан_"
@@ -607,8 +594,31 @@ async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if not tasks:
-        msg = "📭 Нет активных задач." if report_type == "active" else "✅ Просроченных задач нет."
+        msg = {"active": "📭 Нет активных задач.", "overdue": "✅ Просроченных задач нет.",
+               "unassigned": "✅ Нераспределённых заявок нет."}.get(report_type, "📭 Нет задач.")
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(back_keyboard))
+        return
+
+    # Нераспределённые — простой список без группировки по сотруднику
+    if report_type == "unassigned":
+        from datetime import datetime
+        lines = [f"📥 *Нераспределённые заявки >2 дней* ({len(tasks)}):\n"]
+        for t in tasks:
+            tid = t.get("id", "")
+            url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{tid}/"
+            try:
+                days_in = (datetime.now() - datetime.fromisoformat(t["created_date"])).days
+            except Exception:
+                days_in = 0
+            resp = t.get("responsible_name", "—")
+            lines.append(f"• [{t['title']}]({url})\n   👤 {resp} | {days_in} дн.")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n_...список обрезан_"
+        try:
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(back_keyboard))
+        except Exception:
+            await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(back_keyboard))
         return
 
     # Группируем по сотруднику

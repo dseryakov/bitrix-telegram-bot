@@ -414,14 +414,14 @@ def get_tp_long(user_ids: list, days: int = 7) -> list:
 
 
 def get_tp_unassigned(days: int = 2) -> list:
-    """Нераспределённые заявки (STAGE_ID=0) висящие больше N дней."""
+    """Нераспределённые заявки (STAGE_ID=0) висящие больше N дней — топ 20 самых старых."""
     query = _TP_SELECT + f"""
         WHERE t.GROUP_ID = {TP_GROUP_ID}
         AND t.STATUS IN (1, 2, 3)
         AND t.STAGE_ID = 0
         AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
         ORDER BY t.CREATED_DATE ASC
-        LIMIT 100
+        LIMIT 20
     """
     try:
         conn = get_connection()
