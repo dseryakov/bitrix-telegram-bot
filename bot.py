@@ -610,8 +610,9 @@ async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 days_in = (datetime.now() - datetime.fromisoformat(t["created_date"])).days
             except Exception:
                 days_in = 0
-            resp = t.get("responsible_name", "—")
-            lines.append(f"• [{t['title']}]({url})\n   👤 {resp} | {days_in} дн.")
+            accomplices = t.get("accomplice_names", "")
+            acc_str = f"\n   👥 {accomplices}" if accomplices else ""
+            lines.append(f"• [{t['title']}]({url})\n   {days_in} дн.{acc_str}")
         text = "\n".join(lines)
         if len(text) > 4000:
             text = text[:4000] + "\n\n_...список обрезан_"

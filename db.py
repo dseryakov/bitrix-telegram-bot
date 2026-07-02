@@ -414,22 +414,60 @@ def get_tp_long(user_ids: list, days: int = 7) -> list:
 
 
 def get_tp_unassigned(days: int = 2) -> list:
-    """Нераспределённые заявки (STAGE_ID=0) висящие больше N дней — топ 20 самых старых."""
-    query = _TP_SELECT + f"""
-        WHERE t.GROUP_ID = {TP_GROUP_ID}
-        AND t.STATUS IN (1, 2, 3)
-        AND t.STAGE_ID = 0
-        AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
-        ORDER BY t.CREATED_DATE ASC
-        LIMIT 20
+    """Нераспределённые заявки (STAGE_ID=0) где соисполнитель — сотрудник ТП, висящие больше N дней."""
+    all_tp = TP_RETAIL + TP_SYSADMIN
+    placeholders = ','.join(['%s'] * len(all_tp))
+    query = f"""
+    SELECT
+        t.ID as id,
+        t.TITLE as title,
+        t.STATUS as status,
+        t.STAGE_ID as stage_id,
+        COALESCE(s.TITLE, '') as stage_name,
+        t.DEADLINE as deadline,
+        t.CREATED_DATE as created_date,
+        t.CHANGED_DATE as changed_date,
+        t.RESPONSIBLE_ID as responsible_id,
+        CONCAT(COALESCE(u.NAME, ''), ' ', COALESCE(u.LAST_NAME, '')) as responsible_name,
+        GROUP_CONCAT(DISTINCT CONCAT(COALESCE(ua.NAME,''),' ',COALESCE(ua.LAST_NAME,'')) SEPARATOR ', ') as accomplice_names
+    FROM b_tasks t
+    LEFT JOIN b_user u ON u.ID = t.RESPONSIBLE_ID
+    LEFT JOIN b_tasks_stages s ON s.ID = t.STAGE_ID
+    JOIN b_tasks_member m ON m.TASK_ID = t.ID AND m.TYPE IN ('A', 'C') AND m.USER_ID IN ({placeholders})
+    LEFT JOIN b_user ua ON ua.ID = m.USER_ID
+    WHERE t.GROUP_ID = {TP_GROUP_ID}
+    AND t.STATUS IN (1, 2, 3)
+    AND t.STAGE_ID = 0
+    AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
+    GROUP BY t.ID, t.TITLE, t.STATUS, t.STAGE_ID, s.TITLE, t.DEADLINE, t.CREATED_DATE, t.CHANGED_DATE, t.RESPONSIBLE_ID, u.NAME, u.LAST_NAME
+    ORDER BY t.CREATED_DATE ASC
+    LIMIT 50
     """
     try:
         conn = get_connection()
         with conn.cursor() as cursor:
-            cursor.execute(query, [])
+            cursor.execute(query, all_tp)
             rows = cursor.fetchall()
         conn.close()
-        return _format_tp_rows(rows)
+        result = []
+        for row in rows:
+            deadline = row['deadline'].strftime('%Y-%m-%dT%H:%M:%S') if row['deadline'] else ''
+            created = row['created_date'].strftime('%Y-%m-%dT%H:%M:%S') if row['created_date'] else ''
+            changed = row['changed_date'].strftime('%Y-%m-%dT%H:%M:%S') if row['changed_date'] else ''
+            result.append({
+                'id': str(row['id']),
+                'title': row['title'] or 'Без названия',
+                'status': str(row['status']),
+                'stage_id': str(row['stage_id'] or 0),
+                'stage_name': row['stage_name'] or '',
+                'deadline': deadline,
+                'created_date': created,
+                'changed_date': changed,
+                'responsible_id': str(row['responsible_id']) if row['responsible_id'] else '',
+                'responsible_name': (row['responsible_name'] or '').strip() or 'Не указан',
+                'accomplice_names': row.get('accomplice_names', '') or '',
+            })
+        return result
     except Exception as e:
         print(f"DB error get_tp_unassigned: {e}")
         return []
