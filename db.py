@@ -293,3 +293,143 @@ def get_tasks_db(group_ids: list, filter_type: str = "important") -> list:
     except Exception as e:
         print(f"DB error get_tasks_db: {e}")
         return []
+
+
+# --- Техническая поддержка ---
+
+TP_RETAIL = [1363, 833, 95434, 110152, 110487, 107252]   # Сопровождение розницы
+TP_SYSADMIN = [59940, 64513, 22510, 119302, 98217, 78022]  # Системные администраторы
+TP_ALL = TP_RETAIL + TP_SYSADMIN
+TP_GROUP_ID = 102
+
+# Базовый SELECT для задач ТП
+_TP_SELECT = """
+    SELECT
+        t.ID as id,
+        t.TITLE as title,
+        t.STATUS as status,
+        t.STAGE_ID as stage_id,
+        COALESCE(s.TITLE, '') as stage_name,
+        t.DEADLINE as deadline,
+        t.CREATED_DATE as created_date,
+        t.CHANGED_DATE as changed_date,
+        t.RESPONSIBLE_ID as responsible_id,
+        CONCAT(COALESCE(u.NAME, ''), ' ', COALESCE(u.LAST_NAME, '')) as responsible_name
+    FROM b_tasks t
+    LEFT JOIN b_user u ON u.ID = t.RESPONSIBLE_ID
+    LEFT JOIN b_tasks_stages s ON s.ID = t.STAGE_ID
+"""
+
+
+def _format_tp_rows(rows):
+    result = []
+    for row in rows:
+        deadline = row['deadline'].strftime('%Y-%m-%dT%H:%M:%S') if row['deadline'] else ''
+        created = row['created_date'].strftime('%Y-%m-%dT%H:%M:%S') if row['created_date'] else ''
+        changed = row['changed_date'].strftime('%Y-%m-%dT%H:%M:%S') if row['changed_date'] else ''
+        result.append({
+            'id': str(row['id']),
+            'title': row['title'] or 'Без названия',
+            'status': str(row['status']),
+            'stage_id': str(row['stage_id'] or 0),
+            'stage_name': row['stage_name'] or '',
+            'deadline': deadline,
+            'created_date': created,
+            'changed_date': changed,
+            'responsible_id': str(row['responsible_id']) if row['responsible_id'] else '',
+            'responsible_name': (row['responsible_name'] or '').strip() or 'Не указан',
+        })
+    return result
+
+
+def get_tp_active(user_ids: list) -> list:
+    """Задачи в работе (STAGE_ID > 0, статус активный) для сотрудников ТП."""
+    placeholders = ','.join(['%s'] * len(user_ids))
+    query = _TP_SELECT + f"""
+        WHERE t.GROUP_ID = {TP_GROUP_ID}
+        AND t.STATUS IN (1, 2, 3)
+        AND t.STAGE_ID > 0
+        AND t.RESPONSIBLE_ID IN ({placeholders})
+        ORDER BY t.DEADLINE ASC, t.CREATED_DATE ASC
+        LIMIT 100
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute(query, user_ids)
+            rows = cursor.fetchall()
+        conn.close()
+        return _format_tp_rows(rows)
+    except Exception as e:
+        print(f"DB error get_tp_active: {e}")
+        return []
+
+
+def get_tp_overdue(user_ids: list) -> list:
+    """Просроченные задачи (дедлайн прошёл, статус активный) для сотрудников ТП."""
+    placeholders = ','.join(['%s'] * len(user_ids))
+    query = _TP_SELECT + f"""
+        WHERE t.GROUP_ID = {TP_GROUP_ID}
+        AND t.STATUS IN (1, 2, 3)
+        AND t.DEADLINE IS NOT NULL
+        AND t.DEADLINE < NOW()
+        AND t.RESPONSIBLE_ID IN ({placeholders})
+        ORDER BY t.DEADLINE ASC
+        LIMIT 100
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute(query, user_ids)
+            rows = cursor.fetchall()
+        conn.close()
+        return _format_tp_rows(rows)
+    except Exception as e:
+        print(f"DB error get_tp_overdue: {e}")
+        return []
+
+
+def get_tp_long(user_ids: list, days: int = 7) -> list:
+    """Задачи в работе дольше N дней (по дате создания)."""
+    placeholders = ','.join(['%s'] * len(user_ids))
+    query = _TP_SELECT + f"""
+        WHERE t.GROUP_ID = {TP_GROUP_ID}
+        AND t.STATUS IN (1, 2, 3)
+        AND t.STAGE_ID > 0
+        AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
+        AND t.RESPONSIBLE_ID IN ({placeholders})
+        ORDER BY t.CREATED_DATE ASC
+        LIMIT 100
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute(query, user_ids)
+            rows = cursor.fetchall()
+        conn.close()
+        return _format_tp_rows(rows)
+    except Exception as e:
+        print(f"DB error get_tp_long: {e}")
+        return []
+
+
+def get_tp_unassigned(days: int = 2) -> list:
+    """Нераспределённые заявки (STAGE_ID=0) висящие больше N дней."""
+    query = _TP_SELECT + f"""
+        WHERE t.GROUP_ID = {TP_GROUP_ID}
+        AND t.STATUS IN (1, 2, 3)
+        AND t.STAGE_ID = 0
+        AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
+        ORDER BY t.CREATED_DATE ASC
+        LIMIT 100
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            cursor.execute(query, [])
+            rows = cursor.fetchall()
+        conn.close()
+        return _format_tp_rows(rows)
+    except Exception as e:
+        print(f"DB error get_tp_unassigned: {e}")
+        return []

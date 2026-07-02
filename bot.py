@@ -475,6 +475,23 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     group = query.data.replace("anal_", "")
     context.user_data["anal_group"] = group
+
+    # ТП — своё меню
+    if group == "ТП":
+        keyboard = [
+            [
+                InlineKeyboardButton("👥 Сопровождение розницы", callback_data="tp_group_retail"),
+                InlineKeyboardButton("🖥 Системные администраторы", callback_data="tp_group_sysadmin"),
+            ],
+            [InlineKeyboardButton("🔙 Назад", callback_data="anal_back")],
+        ]
+        await query.edit_message_text(
+            "🛠 *Техническая поддержка* — выбери подгруппу:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
     group_label = group if group != "ALL" else "Все группы"
     keyboard = [[
         InlineKeyboardButton("⚡ Быстрый (500 задач)", callback_data="anal_type_quick"),
@@ -485,6 +502,106 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+
+async def tp_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выбор подгруппы ТП → меню трёх отчётов."""
+    query = update.callback_query
+    await query.answer()
+    tp_group = query.data.replace("tp_group_", "")
+    context.user_data["tp_group"] = tp_group
+    label = "👥 Сопровождение розницы" if tp_group == "retail" else "🖥 Системные администраторы"
+    keyboard = [
+        [InlineKeyboardButton("📋 В работе", callback_data="tp_report_active")],
+        [InlineKeyboardButton("🔴 Просроченные", callback_data="tp_report_overdue")],
+        [InlineKeyboardButton("⏰ Долгие (>7 дней) + нераспред. (>2 дней)", callback_data="tp_report_long")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="anal_ТП")],
+    ]
+    await query.edit_message_text(
+        f"{label} — выбери отчёт:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Формирует и показывает отчёт по ТП."""
+    query = update.callback_query
+    await query.answer()
+
+    report_type = query.data.replace("tp_report_", "")
+    tp_group = context.user_data.get("tp_group", "retail")
+    label = "👥 Сопровождение розницы" if tp_group == "retail" else "🖥 Системные администраторы"
+
+    from db import TP_RETAIL, TP_SYSADMIN, get_tp_active, get_tp_overdue, get_tp_long, get_tp_unassigned
+    user_ids = TP_RETAIL if tp_group == "retail" else TP_SYSADMIN
+
+    await query.edit_message_text(f"⏳ Загружаю данные...")
+
+    def fmt_task(t):
+        title = t.get("title", "—")
+        task_id = t.get("id", "")
+        url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{task_id}/"
+        stage = t.get("stage_name", "") or STATUS_LABELS.get(t.get("status", "1"), "—")
+        resp = t.get("responsible_name", "—")
+        deadline = t.get("deadline", "")[:10] if t.get("deadline") else "не указан"
+        created = t.get("created_date", "")[:10] if t.get("created_date") else "—"
+        # Сколько дней в работе
+        from datetime import datetime
+        try:
+            days_in_work = (datetime.now() - datetime.fromisoformat(t["created_date"])).days
+        except Exception:
+            days_in_work = 0
+        return (f"• [{title}]({url})\n"
+                f"   👤 {resp} | {stage}\n"
+                f"   📅 Создана: {created} ({days_in_work} дн.) | ⏰ Дедлайн: {deadline}")
+
+    back_keyboard = [
+        [InlineKeyboardButton("🔙 Назад", callback_data=f"tp_group_{tp_group}")],
+    ]
+
+    if report_type == "active":
+        tasks = get_tp_active(user_ids)
+        title_str = f"📋 *{label}*\nВ работе ({len(tasks)}):\n"
+        if not tasks:
+            await query.edit_message_text("📭 Нет активных задач.", reply_markup=InlineKeyboardMarkup(back_keyboard))
+            return
+        lines = [title_str] + [fmt_task(t) for t in tasks]
+
+    elif report_type == "overdue":
+        tasks = get_tp_overdue(user_ids)
+        title_str = f"🔴 *{label}*\nПросроченные ({len(tasks)}):\n"
+        if not tasks:
+            await query.edit_message_text("✅ Просроченных задач нет.", reply_markup=InlineKeyboardMarkup(back_keyboard))
+            return
+        lines = [title_str] + [fmt_task(t) for t in tasks]
+
+    elif report_type == "long":
+        long_tasks = get_tp_long(user_ids, days=7)
+        unassigned = get_tp_unassigned(days=2)
+        lines = [f"⏰ *{label}*\n"]
+        lines.append(f"*В работе больше 7 дней ({len(long_tasks)}):*")
+        if long_tasks:
+            lines += [fmt_task(t) for t in long_tasks]
+        else:
+            lines.append("_Нет таких задач_")
+        lines.append(f"\n*Нераспределённые заявки больше 2 дней ({len(unassigned)}):*")
+        if unassigned:
+            lines += [fmt_task(t) for t in unassigned]
+        else:
+            lines.append("_Нет таких заявок_")
+    else:
+        await query.edit_message_text("❌ Неизвестный тип отчёта.")
+        return
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n_...список обрезан_"
+
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(back_keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(back_keyboard))
 
 async def resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from users import save_users
@@ -889,6 +1006,8 @@ def main():
     app.add_handler(CallbackQueryHandler(analytics_specialist_role, pattern="^anal_specialist$"))
     app.add_handler(CallbackQueryHandler(analytics_specialist_list, pattern="^spec_role_"))
     app.add_handler(CallbackQueryHandler(analytics_specialist_detail, pattern="^spec_id_"))
+    app.add_handler(CallbackQueryHandler(tp_group_callback, pattern="^tp_group_"))
+    app.add_handler(CallbackQueryHandler(tp_report_callback, pattern="^tp_report_"))
 
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
     app.run_polling()
