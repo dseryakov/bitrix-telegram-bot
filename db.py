@@ -343,12 +343,11 @@ def _format_tp_rows(rows):
 
 
 def get_tp_active(user_ids: list) -> list:
-    """Задачи в работе (STAGE_ID > 0, статус активный) для сотрудников ТП."""
+    """Задачи в работе (статус активный) для сотрудников ТП."""
     placeholders = ','.join(['%s'] * len(user_ids))
     query = _TP_SELECT + f"""
         WHERE t.GROUP_ID = {TP_GROUP_ID}
-        AND t.STATUS IN (1, 2, 3)
-        AND t.STAGE_ID > 0
+        AND t.STATUS IN (2, 3)
         AND t.RESPONSIBLE_ID IN ({placeholders})
         ORDER BY t.DEADLINE ASC, t.CREATED_DATE ASC
         LIMIT 100
@@ -394,8 +393,7 @@ def get_tp_long(user_ids: list, days: int = 7) -> list:
     placeholders = ','.join(['%s'] * len(user_ids))
     query = _TP_SELECT + f"""
         WHERE t.GROUP_ID = {TP_GROUP_ID}
-        AND t.STATUS IN (1, 2, 3)
-        AND t.STAGE_ID > 0
+        AND t.STATUS IN (2, 3)
         AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
         AND t.RESPONSIBLE_ID IN ({placeholders})
         ORDER BY t.CREATED_DATE ASC
