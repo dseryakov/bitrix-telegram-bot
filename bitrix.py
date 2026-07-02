@@ -21,8 +21,9 @@ GROUPS = {
     "WEB":          [328],
     "1С":           [342],
     "ПРОИЗВОДСТВО": [527, 353],
+    "ТП":           [102],
 }
-ALL_GROUP_IDS = [328, 342, 527, 353]
+ALL_GROUP_IDS = [328, 342, 527, 353, 102]
 
 def get_task_tags(task_ids: list) -> dict:
     """

@@ -133,6 +133,9 @@ async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="group_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("🛠 ТП", callback_data="group_ТП"),
+        ],
+        [
             InlineKeyboardButton("📋 Все", callback_data="group_ALL"),
         ],
     ]
@@ -443,6 +446,9 @@ async def back_to_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="group_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("🛠 ТП", callback_data="group_ТП"),
+        ],
+        [
             InlineKeyboardButton("📋 Все", callback_data="group_ALL"),
         ],
     ]
@@ -455,6 +461,9 @@ async def analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="anal_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("🛠 ТП", callback_data="anal_ТП"),
+        ],
+        [
             InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
         ],
     ]
@@ -630,6 +639,9 @@ async def analytics_back_callback(update: Update, context: ContextTypes.DEFAULT_
         ],
         [
             InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="anal_ПРОИЗВОДСТВО"),
+            InlineKeyboardButton("🛠 ТП", callback_data="anal_ТП"),
+        ],
+        [
             InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
         ],
     ]
