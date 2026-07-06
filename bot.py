@@ -556,39 +556,23 @@ async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         report_label = "📥 Нераспределённые (>2 дней)"
     elif report_type == "closed":
         from db import get_tp_closed_stats
-        from datetime import datetime
+        from datetime import datetime, timedelta
         stats = get_tp_closed_stats(user_ids)
-        cur_month = datetime.now().strftime("%B %Y")
-        prev_month = (datetime.now().replace(day=1) - __import__('datetime').timedelta(days=1)).strftime("%B %Y")
+        now = datetime.now()
+        cur_month = now.strftime("%B %Y")
+        prev_dt = (now.replace(day=1) - timedelta(days=1))
+        prev_month = prev_dt.strftime("%B %Y")
 
-        lines = [f"✅ *{label}*\nЗакрытые задачи по месяцам:\n"]
-        lines.append(f"{'Сотрудник':<25} | {'Текущий':^10} | {'Прошлый':^10}")
-        lines.append(f"_{cur_month}_ vs _{prev_month}_\n")
+        total_cur = sum(s['current_month'] for s in stats)
+        total_prev = sum(s['prev_month'] for s in stats)
 
-        # Добавляем тех у кого 0 задач
-        stats_map = {s['user_id']: s for s in stats}
-        from analytics import load_user_cache, _user_names
-        load_user_cache()
-        all_stats = []
-        for uid in user_ids:
-            if str(uid) in stats_map:
-                all_stats.append(stats_map[str(uid)])
-            else:
-                name = _user_names.get(str(uid), f'ID {uid}')
-                all_stats.append({'user_id': str(uid), 'name': name, 'current_month': 0, 'prev_month': 0})
-
-        total_cur = sum(s['current_month'] for s in all_stats)
-        total_prev = sum(s['prev_month'] for s in all_stats)
-
-        for s in sorted(all_stats, key=lambda x: -x['current_month']):
+        lines = [f"✅ *{label}*\nЗакрытые задачи:\n_{cur_month}_ vs _{prev_month}_\n"]
+        for s in stats:
             name = s['name']
-            parts = name.split()
-            short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
             cur = s['current_month']
             prev = s['prev_month']
             trend = "📈" if cur > prev else ("📉" if cur < prev else "➡️")
-            lines.append(f"👤 *{short}*: {cur} {trend} (прошлый: {prev})")
-
+            lines.append(f"👤 *{name}*: {cur} {trend} (прошлый: {prev})")
         lines.append(f"\n*Итого:* {total_cur} (прошлый: {total_prev})")
 
         text = "\n".join(lines)

@@ -474,10 +474,14 @@ def get_tp_unassigned(days: int = 2) -> list:
 def get_tp_closed_stats(user_ids: list) -> list:
     """Статистика закрытых задач за прошлый и текущий месяц для сотрудников ТП."""
     placeholders = ','.join(['%s'] * len(user_ids))
-    query = f"""
+
+    # Получаем имена всех сотрудников
+    names_query = f"SELECT ID, NAME, LAST_NAME FROM b_user WHERE ID IN ({placeholders})"
+
+    # Получаем статистику закрытых задач
+    stats_query = f"""
         SELECT
             t.RESPONSIBLE_ID as user_id,
-            CONCAT(COALESCE(u.NAME,''),' ',COALESCE(u.LAST_NAME,'')) as responsible_name,
             SUM(CASE WHEN YEAR(t.CLOSED_DATE) = YEAR(CURDATE())
                      AND MONTH(t.CLOSED_DATE) = MONTH(CURDATE())
                      THEN 1 ELSE 0 END) as current_month,
@@ -485,34 +489,36 @@ def get_tp_closed_stats(user_ids: list) -> list:
                      AND MONTH(t.CLOSED_DATE) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
                      THEN 1 ELSE 0 END) as prev_month
         FROM b_tasks t
-        JOIN b_user u ON u.ID = t.RESPONSIBLE_ID
         WHERE t.GROUP_ID = {TP_GROUP_ID}
         AND t.STATUS = 5
         AND t.RESPONSIBLE_ID IN ({placeholders})
         AND t.CLOSED_DATE >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-01')
-        GROUP BY t.RESPONSIBLE_ID, u.NAME, u.LAST_NAME
-        ORDER BY current_month DESC
+        GROUP BY t.RESPONSIBLE_ID
     """
     try:
         conn = get_connection()
         with conn.cursor() as cursor:
-            cursor.execute(query, user_ids)
-            rows = cursor.fetchall()
+            cursor.execute(names_query, user_ids)
+            names_map = {str(row['ID']): f"{row['LAST_NAME'] or ''} {(row['NAME'] or '')[0]}." if row['LAST_NAME'] else row['NAME'] or f'ID {row["ID"]}' for row in cursor.fetchall()}
+
+            cursor.execute(stats_query, user_ids)
+            stats_map = {str(row['user_id']): row for row in cursor.fetchall()}
         conn.close()
-        return [
-            {
-                'user_id': str(row['user_id']),
-                'name': (row['responsible_name'] or '').strip() or 'Не указан',
-                'current_month': int(row['current_month'] or 0),
-                'prev_month': int(row['prev_month'] or 0),
-            }
-            for row in rows
-        ]
+
+        result = []
+        for uid in user_ids:
+            uid_str = str(uid)
+            row = stats_map.get(uid_str)
+            result.append({
+                'user_id': uid_str,
+                'name': names_map.get(uid_str, f'ID {uid}'),
+                'current_month': int(row['current_month'] or 0) if row else 0,
+                'prev_month': int(row['prev_month'] or 0) if row else 0,
+            })
+        return sorted(result, key=lambda x: -x['current_month'])
     except Exception as e:
         print(f"DB error get_tp_closed_stats: {e}")
         return []
-    """Нераспределённые заявки (STAGE_ID=0) где соисполнитель — сотрудник ТП, висящие больше N дней."""
-    all_tp = TP_RETAIL + TP_SYSADMIN
     placeholders = ','.join(['%s'] * len(all_tp))
     query = f"""
     SELECT
