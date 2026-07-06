@@ -492,7 +492,7 @@ def get_tp_closed_stats(user_ids: list) -> list:
         WHERE t.GROUP_ID = {TP_GROUP_ID}
         AND t.STATUS = 5
         AND t.RESPONSIBLE_ID IN ({placeholders})
-        AND t.CLOSED_DATE >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-01')
+        AND t.CLOSED_DATE >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%%Y-%%m-01')
         GROUP BY t.RESPONSIBLE_ID
     """
     try:
