@@ -396,8 +396,8 @@ def get_tp_long(user_ids: list, days: int = 7) -> list:
         AND t.STATUS IN (2, 3)
         AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY
         AND t.RESPONSIBLE_ID IN ({placeholders})
-        ORDER BY t.CREATED_DATE ASC
-        LIMIT 100
+        ORDER BY t.RESPONSIBLE_ID ASC, t.CREATED_DATE ASC
+        LIMIT 200
     """
     try:
         conn = get_connection()
