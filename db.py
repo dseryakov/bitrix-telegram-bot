@@ -297,9 +297,10 @@ def get_tasks_db(group_ids: list, filter_type: str = "important") -> list:
 
 # --- Техническая поддержка ---
 
-TP_RETAIL = [1363, 833, 37985, 114682, 110487, 107252]   # Сопровождение розницы
-TP_SYSADMIN = [59940, 64513, 16522, 119302, 98217, 98948]  # Системные администраторы
-TP_ALL = TP_RETAIL + TP_SYSADMIN
+TP_RETAIL = [1363, 833, 37985, 114682, 110487, 107252]       # Сопровождение розницы
+TP_SYSADMIN = [59940, 64513, 16522, 119302, 98217, 98948]    # Системные администраторы
+TP_SYSADMIN_UZ = [97441, 93323, 106080, 80992]               # УЗ Сисадмины
+TP_ALL = TP_RETAIL + TP_SYSADMIN + TP_SYSADMIN_UZ
 TP_GROUP_ID = 102
 
 # Базовый SELECT для задач ТП

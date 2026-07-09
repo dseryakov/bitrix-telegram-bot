@@ -482,6 +482,8 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
             [
                 InlineKeyboardButton("👥 Сопровождение розницы", callback_data="tp_group_retail"),
                 InlineKeyboardButton("🖥 Системные администраторы", callback_data="tp_group_sysadmin"),
+            ], [
+                InlineKeyboardButton("🇺🇿 УЗ Сисадмины", callback_data="tp_group_sysadmin_uz"),
             ],
             [InlineKeyboardButton("🔙 Назад", callback_data="anal_back")],
         ]
@@ -510,7 +512,7 @@ async def tp_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     tp_group = query.data.replace("tp_group_", "")
     context.user_data["tp_group"] = tp_group
-    label = "👥 Сопровождение розницы" if tp_group == "retail" else "🖥 Системные администраторы"
+    label = "👥 Сопровождение розницы" if tp_group == "retail" else ("🖥 Системные администраторы" if tp_group == "sysadmin" else "🇺🇿 УЗ Сисадмины")
     keyboard = [
         [InlineKeyboardButton("📋 В работе", callback_data="tp_report_active")],
         [InlineKeyboardButton("🔴 Просроченные", callback_data="tp_report_overdue")],
@@ -533,10 +535,10 @@ async def tp_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     report_type = query.data.replace("tp_report_", "")
     tp_group = context.user_data.get("tp_group", "retail")
-    label = "👥 Сопровождение розницы" if tp_group == "retail" else "🖥 Системные администраторы"
+    label = "👥 Сопровождение розницы" if tp_group == "retail" else ("🖥 Системные администраторы" if tp_group == "sysadmin" else "🇺🇿 УЗ Сисадмины")
 
-    from db import TP_RETAIL, TP_SYSADMIN, get_tp_active, get_tp_overdue, get_tp_long, get_tp_unassigned
-    user_ids = TP_RETAIL if tp_group == "retail" else TP_SYSADMIN
+    from db import TP_RETAIL, TP_SYSADMIN, TP_SYSADMIN_UZ, get_tp_active, get_tp_overdue, get_tp_long, get_tp_unassigned
+    user_ids = TP_RETAIL if tp_group == "retail" else (TP_SYSADMIN if tp_group == "sysadmin" else TP_SYSADMIN_UZ)
 
     await query.edit_message_text(f"⏳ Загружаю данные...")
 
