@@ -495,10 +495,15 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     group_label = group if group != "ALL" else "Все группы"
-    keyboard = [[
-        InlineKeyboardButton("⚡ Быстрый (500 задач)", callback_data="anal_type_quick"),
-        InlineKeyboardButton("🔍 Полный (за год)", callback_data="anal_type_full"),
-    ]]
+    keyboard = [
+        [
+            InlineKeyboardButton("⚡ Быстрый (500 задач)", callback_data="anal_type_quick"),
+            InlineKeyboardButton("🔍 Полный (за год)", callback_data="anal_type_full"),
+        ],
+        [
+            InlineKeyboardButton("✅ Выполненные по месяцам", callback_data="anal_type_closed"),
+        ],
+    ]
     await query.edit_message_text(
         f"Группа: *{group_label}*\nВыбери тип анализа:",
         parse_mode="Markdown",
@@ -778,6 +783,43 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
     anal_type = query.data.replace("anal_type_", "")
     group = context.user_data.get("anal_group", "ALL")
     group_label = group if group != "ALL" else "Все группы"
+
+    # Ветка выполненных задач по месяцам
+    if anal_type == "closed":
+        await query.edit_message_text(f"⏳ Загружаю статистику для {group_label}...")
+        from db import get_group_closed_stats
+        from analytics import GROUPS
+        from datetime import datetime, timedelta
+        group_ids = GROUPS.get(group, GROUPS["ALL"])
+        stats = get_group_closed_stats(group_ids)
+        now = datetime.now()
+        cur_month = now.strftime("%B %Y")
+        prev_month = (now.replace(day=1) - timedelta(days=1)).strftime("%B %Y")
+        total_cur_r = sum(s['cur_resp'] for s in stats)
+        total_cur_a = sum(s['cur_acc'] for s in stats)
+        total_prev_r = sum(s['prev_resp'] for s in stats)
+        total_prev_a = sum(s['prev_acc'] for s in stats)
+        lines = [f"✅ *{group_label}* — Выполненные задачи\n_{cur_month}_ vs _{prev_month}_\n"]
+        for s in stats:
+            cur = s['cur_total']
+            prev = s['prev_total']
+            trend = "📈" if cur > prev else ("📉" if cur < prev else "➡️")
+            lines.append(
+                f"👤 *{s['name']}*: {cur} {trend} (прошлый: {prev})\n"
+                f"   исп: {s['cur_resp']} / соисп: {s['cur_acc']}"
+            )
+        lines.append(
+            f"\n*Итого:* {total_cur_r + total_cur_a} (прошлый: {total_prev_r + total_prev_a})\n"
+            f"_исп: {total_cur_r} / соисп: {total_cur_a}_"
+        )
+        text = "\n".join(lines)
+        keyboard = [[InlineKeyboardButton("🔙 Выбрать другую группу", callback_data="anal_back")]]
+        try:
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception:
+            await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
     type_label = "⚡ Быстрый" if anal_type == "quick" else "🔍 Полный"
 
     await query.edit_message_text(f"⏳ Считаю аналитику для {group_label}...")
