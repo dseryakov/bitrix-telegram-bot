@@ -764,54 +764,63 @@ def get_group_unassigned(group_ids, days=2):
         print(f"DB error get_group_unassigned: {e}"); return []
 
 
+
 def get_group_closed_stats(group_ids):
+    from datetime import date
+    today = date.today()
+    first_this = today.replace(day=1).strftime('%Y-%m-%d')
+    if today.month == 1:
+        first_prev = today.replace(year=today.year-1, month=12, day=1).strftime('%Y-%m-%d')
+    else:
+        first_prev = today.replace(month=today.month-1, day=1).strftime('%Y-%m-%d')
     ph = ','.join(['%s'] * len(group_ids))
     try:
         conn = get_connection()
         with conn.cursor() as cursor:
-            cursor.execute(f"""
-                SELECT ID, NAME, LAST_NAME FROM b_user
-                WHERE ID IN (
-                    SELECT DISTINCT RESPONSIBLE_ID FROM b_tasks
-                    WHERE GROUP_ID IN ({ph}) AND STATUS = 5
-                    AND CLOSED_DATE >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%%Y-%%m-01')
-                )
-            """, group_ids)
-            names_map = {{str(r['ID']): f"{r['LAST_NAME'] or ''} {(r['NAME'] or '')[0]}." if r['LAST_NAME'] else r['NAME'] or f"ID {r['ID']}" for r in cursor.fetchall()}}
+            # Имена всех исполнителей группы
+            cursor.execute(
+                "SELECT ID, NAME, LAST_NAME FROM b_user WHERE ID IN "
+                "(SELECT DISTINCT RESPONSIBLE_ID FROM b_tasks "
+                "WHERE GROUP_ID IN (" + ph + ") AND STATUS=5 "
+                "AND CLOSED_DATE >= '" + first_prev + "')",
+                group_ids)
+            names_map = {str(r['ID']): ((r['LAST_NAME'] or '') + ' ' + (r['NAME'] or '')[0] + '.') if r['LAST_NAME'] else (r['NAME'] or '') for r in cursor.fetchall()}
 
-            cursor.execute(f"""
-                SELECT RESPONSIBLE_ID as uid,
-                    SUM(CASE WHEN YEAR(CLOSED_DATE)=YEAR(CURDATE()) AND MONTH(CLOSED_DATE)=MONTH(CURDATE()) THEN 1 ELSE 0 END) as cur_resp,
-                    SUM(CASE WHEN YEAR(CLOSED_DATE)=YEAR(DATE_SUB(CURDATE(),INTERVAL 1 MONTH)) AND MONTH(CLOSED_DATE)=MONTH(DATE_SUB(CURDATE(),INTERVAL 1 MONTH)) THEN 1 ELSE 0 END) as prev_resp
-                FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS=5
-                AND CLOSED_DATE >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%%Y-%%m-01')
-                GROUP BY RESPONSIBLE_ID
-            """, group_ids)
-            resp_map = {{str(r['uid']): r for r in cursor.fetchall()}}
+            # Статистика как исполнитель
+            cursor.execute(
+                "SELECT RESPONSIBLE_ID as uid,"
+                "SUM(CASE WHEN CLOSED_DATE >= '" + first_this + "' THEN 1 ELSE 0 END) as cur_resp,"
+                "SUM(CASE WHEN CLOSED_DATE >= '" + first_prev + "' AND CLOSED_DATE < '" + first_this + "' THEN 1 ELSE 0 END) as prev_resp "
+                "FROM b_tasks WHERE GROUP_ID IN (" + ph + ") AND STATUS=5 "
+                "AND CLOSED_DATE >= '" + first_prev + "' GROUP BY RESPONSIBLE_ID",
+                group_ids)
+            resp_map = {str(r['uid']): r for r in cursor.fetchall()}
 
-            cursor.execute(f"""
-                SELECT m.USER_ID as uid,
-                    SUM(CASE WHEN YEAR(t.CLOSED_DATE)=YEAR(CURDATE()) AND MONTH(t.CLOSED_DATE)=MONTH(CURDATE()) THEN 1 ELSE 0 END) as cur_acc,
-                    SUM(CASE WHEN YEAR(t.CLOSED_DATE)=YEAR(DATE_SUB(CURDATE(),INTERVAL 1 MONTH)) AND MONTH(t.CLOSED_DATE)=MONTH(DATE_SUB(CURDATE(),INTERVAL 1 MONTH)) THEN 1 ELSE 0 END) as prev_acc
-                FROM b_tasks t JOIN b_tasks_member m ON m.TASK_ID=t.ID AND m.TYPE IN ('A','C')
-                WHERE t.GROUP_ID IN ({ph}) AND t.STATUS=5
-                AND t.CLOSED_DATE >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%%Y-%%m-01')
-                GROUP BY m.USER_ID
-            """, group_ids)
-            acc_map = {{str(r['uid']): r for r in cursor.fetchall()}}
+            # Статистика как соисполнитель — только сотрудники группы
+            cursor.execute(
+                "SELECT m.USER_ID as uid,"
+                "SUM(CASE WHEN t.CLOSED_DATE >= '" + first_this + "' THEN 1 ELSE 0 END) as cur_acc,"
+                "SUM(CASE WHEN t.CLOSED_DATE >= '" + first_prev + "' AND t.CLOSED_DATE < '" + first_this + "' THEN 1 ELSE 0 END) as prev_acc "
+                "FROM b_tasks t JOIN b_tasks_member m ON m.TASK_ID=t.ID AND m.TYPE IN ('A','C') "
+                "WHERE t.GROUP_ID IN (" + ph + ") AND t.STATUS=5 "
+                "AND t.CLOSED_DATE >= '" + first_prev + "' "
+                "AND m.USER_ID IN (SELECT DISTINCT RESPONSIBLE_ID FROM b_tasks WHERE GROUP_ID IN (" + ph + ") AND STATUS=5 AND CLOSED_DATE >= '" + first_prev + "') "
+                "GROUP BY m.USER_ID",
+                group_ids + group_ids)
+            acc_map = {str(r['uid']): r for r in cursor.fetchall()}
         conn.close()
-
         all_uids = set(resp_map) | set(acc_map)
         result = []
         for uid in all_uids:
-            r = resp_map.get(uid, {{}})
-            a = acc_map.get(uid, {{}})
-            name = names_map.get(uid, f'ID {{uid}}')
+            r = resp_map.get(uid, {})
+            a = acc_map.get(uid, {})
+            name = names_map.get(uid, 'ID ' + uid)
             cur_r = int(r.get('cur_resp') or 0)
             prev_r = int(r.get('prev_resp') or 0)
             cur_a = int(a.get('cur_acc') or 0)
             prev_a = int(a.get('prev_acc') or 0)
-            result.append({{'user_id': uid, 'name': name, 'cur_resp': cur_r, 'prev_resp': prev_r, 'cur_acc': cur_a, 'prev_acc': prev_a, 'cur_total': cur_r+cur_a, 'prev_total': prev_r+prev_a}})
+            result.append({'user_id': uid, 'name': name, 'cur_resp': cur_r, 'prev_resp': prev_r, 'cur_acc': cur_a, 'prev_acc': prev_a, 'cur_total': cur_r+cur_a, 'prev_total': prev_r+prev_a})
         return sorted(result, key=lambda x: -x['cur_total'])
     except Exception as e:
-        print(f"DB error get_group_closed_stats: {{e}}"); return []
+        print('DB error get_group_closed_stats:', e)
+        return []
