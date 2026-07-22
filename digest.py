@@ -241,8 +241,10 @@ def format_data_for_llm(data: dict) -> str:
 
 
 def call_claude(data_text: str) -> str:
-    """Отправляет данные в Claude API и получает дайджест."""
-    prompt = f"""Ты опытный ИТ-аналитик компании Markformelle (производитель одежды, Беларусь).
+    """Отправляет данные в Groq API и получает дайджест."""
+    import os
+    groq_key = os.getenv("GROQ_API_KEY")
+    prompt = """Ты опытный ИТ-аналитик компании Markformelle (производитель одежды, Беларусь).
 Тебе предоставлены данные из системы управления задачами Битрикс24 за прошедшую неделю.
 Группы: WEB (веб-разработка), 1С (1С-разработка), ПРОИЗВОДСТВО (производственные системы), ТП (техподдержка).
 
@@ -268,26 +270,24 @@ def call_claude(data_text: str) -> str:
 Не придумывай данные которых нет — используй только то что предоставлено.
 
 ДАННЫЕ:
-{data_text}"""
+""" + data_text
 
     response = requests.post(
-        "https://api.anthropic.com/v1/messages",
+        os.getenv("TOGETHER_BASE_URL", "https://api.together.xyz/v1") + "/chat/completions",
         headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
+            "Authorization": f"Bearer {os.getenv('TOGETHER_API_KEY')}",
+            "Content-Type": "application/json",
         },
         json={
-            "model": "claude-sonnet-4-6",
+            "model": "qwen/qwen3-next-80b-a3b-thinking",
+            "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000,
-            "messages": [{"role": "user", "content": prompt}]
+            "temperature": 0.7,
         },
         timeout=60,
     )
     response.raise_for_status()
-    return response.json()['content'][0]['text']
-
-
+    return response.json()['choices'][0]['message']['content']
 def send_telegram(chat_id: str, text: str):
     """Отправляет сообщение в Telegram (разбивает если >4000 символов)."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
