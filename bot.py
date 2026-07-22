@@ -502,6 +502,7 @@ async def analytics_group_callback(update: Update, context: ContextTypes.DEFAULT
         ],
         [
             InlineKeyboardButton("✅ Выполненные по месяцам", callback_data="anal_type_closed"),
+            InlineKeyboardButton("📋 Задачи", callback_data="anal_type_tasks"),
         ],
     ]
     await query.edit_message_text(
@@ -820,6 +821,25 @@ async def analytics_type_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
+    if anal_type == "tasks":
+        from analytics import GROUPS
+        group_ids = GROUPS.get(group, GROUPS["ALL"])
+        context.user_data["dev_group_ids"] = group_ids
+        context.user_data["dev_group_label"] = group_label
+        keyboard = [
+            [InlineKeyboardButton("📋 В работе", callback_data="dev_tasks_active")],
+            [InlineKeyboardButton("🔴 Просроченные", callback_data="dev_tasks_overdue")],
+            [InlineKeyboardButton("⏰ Долгие (>7 дней)", callback_data="dev_tasks_long")],
+            [InlineKeyboardButton("📥 Нераспределённые (>2 дней)", callback_data="dev_tasks_unassigned")],
+            [InlineKeyboardButton("🔙 Назад", callback_data=f"anal_{group}")],
+        ]
+        await query.edit_message_text(
+            f"📋 *{group_label}* — задачи:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
     type_label = "⚡ Быстрый" if anal_type == "quick" else "🔍 Полный"
 
     await query.edit_message_text(f"⏳ Считаю аналитику для {group_label}...")
@@ -1121,6 +1141,148 @@ async def analytics_specialist_detail(update: Update, context: ContextTypes.DEFA
     except Exception:
         await query.edit_message_text(text.replace("*", "").replace("_", ""), reply_markup=InlineKeyboardMarkup(keyboard))       
 
+async def dev_tasks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отчёты по задачам группы разработки — аналог ТП."""
+    query = update.callback_query
+    await query.answer()
+
+    report_type = query.data.replace("dev_tasks_", "")
+    group_ids = context.user_data.get("dev_group_ids", [328])
+    group_label = context.user_data.get("dev_group_label", "")
+    group_key = context.user_data.get("anal_group", "ALL")
+
+    from db import get_group_active, get_group_overdue, get_group_long, get_group_unassigned
+
+    await query.edit_message_text("⏳ Загружаю данные...")
+
+    back_keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=f"anal_type_tasks")]]
+
+    if report_type == "active":
+        tasks = get_group_active(group_ids)
+        report_label = "📋 В работе"
+    elif report_type == "overdue":
+        tasks = get_group_overdue(group_ids)
+        report_label = "🔴 Просроченные"
+    elif report_type == "long":
+        tasks = get_group_long(group_ids, days=7)
+        report_label = "⏰ Долгие (>7 дней)"
+    elif report_type == "unassigned":
+        tasks = get_group_unassigned(group_ids, days=2)
+        report_label = "📥 Нераспределённые (>2 дней)"
+    else:
+        await query.edit_message_text("❌ Неизвестный тип.")
+        return
+
+    if not tasks:
+        await query.edit_message_text(f"✅ Нет задач по фильтру '{report_label}'.", reply_markup=InlineKeyboardMarkup(back_keyboard))
+        return
+
+    # Для нераспределённых — простой список
+    if report_type == "unassigned":
+        from datetime import datetime
+        lines = [f"📥 *{group_label}* — Нераспределённые >2 дней ({len(tasks)}):\n"]
+        for t in tasks:
+            tid = t.get("id", "")
+            url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{tid}/"
+            try:
+                days_in = (datetime.now() - datetime.fromisoformat(t["created_date"])).days
+            except Exception:
+                days_in = 0
+            lines.append(f"• [{t['title']}]({url}) — {days_in} дн.")
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:4000] + "\n_...список обрезан_"
+        try:
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(back_keyboard))
+        except Exception:
+            await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(back_keyboard))
+        return
+
+    # Группируем по сотруднику
+    by_person = {}
+    for t in tasks:
+        name = t.get("responsible_name", "Не указан")
+        if name not in by_person:
+            by_person[name] = []
+        by_person[name].append(t)
+    sorted_persons = sorted(by_person.items(), key=lambda x: -len(x[1]))
+
+    context.user_data["dev_tasks"] = tasks
+    context.user_data["dev_persons"] = [name for name, _ in sorted_persons]
+    context.user_data["dev_report_type"] = report_type
+    context.user_data["dev_report_label"] = report_label
+
+    lines = [f"{report_label} — *{group_label}* ({len(tasks)}):\n"]
+    for name, ptasks in sorted_persons:
+        parts = name.split()
+        short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
+        lines.append(f"👤 *{short}* — {len(ptasks)} задач")
+
+    keyboard = []
+    row = []
+    for i, (name, _) in enumerate(sorted_persons):
+        parts = name.split()
+        short = f"{parts[-1]} {parts[0][0]}." if len(parts) >= 2 else name
+        row.append(InlineKeyboardButton(short, callback_data=f"dev_person_{i}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="anal_type_tasks")])
+
+    text = "\n".join(lines)
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*",""), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def dev_person_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Детали задач по конкретному сотруднику группы разработки."""
+    query = update.callback_query
+    await query.answer()
+
+    idx = int(query.data.replace("dev_person_", ""))
+    persons = context.user_data.get("dev_persons", [])
+    tasks = context.user_data.get("dev_tasks", [])
+    report_label = context.user_data.get("dev_report_label", "")
+    report_type = context.user_data.get("dev_report_type", "active")
+
+    if idx >= len(persons):
+        await query.edit_message_text("❌ Данные устарели, запросите отчёт заново.")
+        return
+
+    name = persons[idx]
+    person_tasks = [t for t in tasks if t.get("responsible_name") == name]
+
+    from datetime import datetime
+    lines = [f"{report_label}\n👤 *{name}* ({len(person_tasks)}):\n"]
+    for t in person_tasks:
+        tid = t.get("id", "")
+        url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{tid}/"
+        stage = t.get("stage_name") or STATUS_LABELS.get(t.get("status", "1"), "—")
+        deadline = t.get("deadline", "")[:10] if t.get("deadline") else "не указан"
+        try:
+            days_in = (datetime.now() - datetime.fromisoformat(t["created_date"])).days
+        except Exception:
+            days_in = 0
+        lines.append(f"• [{t['title']}]({url})\n   {stage} | {days_in} дн. | ⏰ {deadline}")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n_...список обрезан_"
+
+    keyboard = [
+        [InlineKeyboardButton("🔙 К сводке", callback_data=f"dev_tasks_{report_type}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="anal_type_tasks")],
+    ]
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -1189,6 +1351,8 @@ def main():
     app.add_handler(CallbackQueryHandler(tp_group_callback, pattern="^tp_group_"))
     app.add_handler(CallbackQueryHandler(tp_report_callback, pattern="^tp_report_"))
     app.add_handler(CallbackQueryHandler(tp_person_callback, pattern="^tp_person_"))
+    app.add_handler(CallbackQueryHandler(dev_tasks_callback, pattern="^dev_tasks_"))
+    app.add_handler(CallbackQueryHandler(dev_person_callback, pattern="^dev_person_"))
 
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
     app.run_polling()

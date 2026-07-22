@@ -575,3 +575,96 @@ def get_tp_closed_stats(user_ids: list) -> list:
     except Exception as e:
         print(f"DB error get_tp_unassigned: {e}")
         return []
+
+# --- Универсальные функции для групп разработки ---
+
+_GROUP_SELECT = """
+    SELECT
+        t.ID as id,
+        t.TITLE as title,
+        t.STATUS as status,
+        t.STAGE_ID as stage_id,
+        COALESCE(s.TITLE, '') as stage_name,
+        t.DEADLINE as deadline,
+        t.CREATED_DATE as created_date,
+        t.RESPONSIBLE_ID as responsible_id,
+        CONCAT(COALESCE(u.NAME, ''), ' ', COALESCE(u.LAST_NAME, '')) as responsible_name
+    FROM b_tasks t
+    LEFT JOIN b_user u ON u.ID = t.RESPONSIBLE_ID
+    LEFT JOIN b_tasks_stages s ON s.ID = t.STAGE_ID
+"""
+
+
+def _fmt_group_rows(rows):
+    result = []
+    for row in rows:
+        deadline = row['deadline'].strftime('%Y-%m-%dT%H:%M:%S') if row['deadline'] else ''
+        created = row['created_date'].strftime('%Y-%m-%dT%H:%M:%S') if row['created_date'] else ''
+        result.append({
+            'id': str(row['id']),
+            'title': row['title'] or 'Без названия',
+            'status': str(row['status']),
+            'stage_id': str(row['stage_id'] or 0),
+            'stage_name': row['stage_name'] or '',
+            'deadline': deadline,
+            'created_date': created,
+            'responsible_id': str(row['responsible_id']) if row['responsible_id'] else '',
+            'responsible_name': (row['responsible_name'] or '').strip() or 'Не указан',
+        })
+    return result
+
+
+def get_group_active(group_ids):
+    ph = ','.join(['%s'] * len(group_ids))
+    q = _GROUP_SELECT + f"WHERE t.GROUP_ID IN ({ph}) AND t.STATUS IN (2,3) ORDER BY t.DEADLINE ASC, t.CREATED_DATE ASC LIMIT 200"
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(q, group_ids)
+            rows = cur.fetchall()
+        conn.close()
+        return _fmt_group_rows(rows)
+    except Exception as e:
+        print(f"DB error get_group_active: {e}"); return []
+
+
+def get_group_overdue(group_ids):
+    ph = ','.join(['%s'] * len(group_ids))
+    q = _GROUP_SELECT + f"WHERE t.GROUP_ID IN ({ph}) AND t.STATUS IN (1,2,3) AND t.DEADLINE IS NOT NULL AND t.DEADLINE < NOW() ORDER BY t.DEADLINE ASC LIMIT 200"
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(q, group_ids)
+            rows = cur.fetchall()
+        conn.close()
+        return _fmt_group_rows(rows)
+    except Exception as e:
+        print(f"DB error get_group_overdue: {e}"); return []
+
+
+def get_group_long(group_ids, days=7):
+    ph = ','.join(['%s'] * len(group_ids))
+    q = _GROUP_SELECT + f"WHERE t.GROUP_ID IN ({ph}) AND t.STATUS IN (2,3) AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY ORDER BY t.RESPONSIBLE_ID ASC, t.CREATED_DATE ASC LIMIT 200"
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(q, group_ids)
+            rows = cur.fetchall()
+        conn.close()
+        return _fmt_group_rows(rows)
+    except Exception as e:
+        print(f"DB error get_group_long: {e}"); return []
+
+
+def get_group_unassigned(group_ids, days=2):
+    ph = ','.join(['%s'] * len(group_ids))
+    q = _GROUP_SELECT + f"WHERE t.GROUP_ID IN ({ph}) AND t.STATUS IN (1,2,3) AND t.STAGE_ID = 0 AND t.CREATED_DATE <= NOW() - INTERVAL {days} DAY ORDER BY t.CREATED_DATE ASC LIMIT 50"
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(q, group_ids)
+            rows = cur.fetchall()
+        conn.close()
+        return _fmt_group_rows(rows)
+    except Exception as e:
+        print(f"DB error get_group_unassigned: {e}"); return []
