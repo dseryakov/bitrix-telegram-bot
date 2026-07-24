@@ -53,6 +53,7 @@ def get_group_leads():
             WHERE group_name IS NOT NULL
             AND b24_id IS NOT NULL
             AND is_blocked = FALSE
+            AND roles::jsonb ? 'ROLE_GROUP_LEAD'
         """)
         leads = [dict(r) for r in cur.fetchall()]
         conn.close()
@@ -83,7 +84,7 @@ def get_group_tasks(group_ids: list):
             AND t.DEADLINE IS NOT NULL
             AND t.DEADLINE < NOW()
             ORDER BY days_overdue DESC
-            LIMIT 20
+            LIMIT 10
         """, group_ids)
         for r in cur.fetchall():
             result['overdue'].append({
@@ -106,8 +107,9 @@ def get_group_tasks(group_ids: list):
             WHERE t.GROUP_ID IN ({ph})
             AND t.STATUS IN (2, 3)
             AND DATEDIFF(NOW(), t.CREATED_DATE) > 7
+            AND (s.TITLE IS NULL OR s.TITLE NOT IN ('Сделаны', 'Сделана', 'Выполнено', 'Закрыто'))
             ORDER BY days_in_work DESC
-            LIMIT 20
+            LIMIT 10
         """, group_ids)
         for r in cur.fetchall():
             result['long'].append({
@@ -134,7 +136,7 @@ def format_group_message(group_name: str, tasks: dict) -> str:
             url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{t['id']}/"
             lines.append(
                 f"• [{t['title'][:50]}]({url})\n"
-                f"  👤 {t['responsible']} | просрочена на {t['days']} дн. | ⏰ {t['deadline']}"
+                "  👤 " + (' '.join(t['responsible'].split()[:2])) + f" | {t['days']} дн. просрочки | ⏰ {t['deadline']}"
             )
     else:
         lines.append("✅ *Просроченных задач нет*")
@@ -149,7 +151,7 @@ def format_group_message(group_name: str, tasks: dict) -> str:
             stage_str = f" [{t['stage']}]" if t['stage'] else ""
             lines.append(
                 f"• [{t['title'][:50]}]({url})\n"
-                f"  👤 {t['responsible']} | {t['days']} дн.{stage_str}"
+                "  👤 " + (' '.join(t['responsible'].split()[:2])) + f" | {t['days']} дн.{stage_str}"
             )
     else:
         lines.append("✅ *Долгих задач нет*")
