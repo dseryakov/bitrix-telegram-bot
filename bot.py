@@ -24,6 +24,7 @@ from telegram.ext import (
 from bitrix import get_tasks, get_calendar_events, create_meeting, get_last_comment, find_user_by_email, send_verification_code, get_task_tags
 from config import TELEGRAM_TOKEN
 from users import get_bitrix_user, register_user
+from chat_summary import save_message, MONITORED_CHATS
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -1283,6 +1284,26 @@ async def dev_person_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+
+async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохраняет сообщения из мониторируемых групповых чатов."""
+    msg = update.message
+    if not msg or not msg.text:
+        return
+    chat_id = msg.chat.id
+    if chat_id not in MONITORED_CHATS:
+        return
+    user = msg.from_user
+    user_name = f"{user.last_name or ''} {user.first_name or ''}".strip() if user else "Unknown"
+    save_message(
+        chat_id=chat_id,
+        chat_title=MONITORED_CHATS[chat_id],
+        user_id=user.id if user else 0,
+        user_name=user_name,
+        text=msg.text,
+    )
+
+
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -1353,6 +1374,7 @@ def main():
     app.add_handler(CallbackQueryHandler(tp_person_callback, pattern="^tp_person_"))
     app.add_handler(CallbackQueryHandler(dev_tasks_callback, pattern="^dev_tasks_"))
     app.add_handler(CallbackQueryHandler(dev_person_callback, pattern="^dev_person_"))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.GROUPS, group_message_handler))
 
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
     app.run_polling()
