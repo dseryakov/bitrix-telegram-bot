@@ -20,6 +20,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_message
 MONITORED_CHATS = {
     -1002822290717: "WEB",
     -1003824587590: "1С",
+    -5144877546: "Синван (1С)",
 }
 
 
