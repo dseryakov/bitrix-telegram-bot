@@ -144,7 +144,13 @@ def collect_data():
             SELECT COUNT(*) as cnt,
                    SUM(CASE WHEN DATEDIFF(NOW(), CREATED_DATE) > 2 THEN 1 ELSE 0 END) as old_cnt,
                    MAX(DATEDIFF(NOW(), CREATED_DATE)) as max_days
-            FROM b_tasks WHERE GROUP_ID = 102 AND STATUS IN (1, 2, 3) AND STAGE_ID = 0
+            FROM b_tasks t
+            WHERE t.GROUP_ID = 102 AND t.STATUS IN (1, 2, 3) AND t.STAGE_ID = 0
+            AND EXISTS (
+                SELECT 1 FROM b_tasks_member m
+                WHERE m.TASK_ID = t.ID AND m.TYPE IN ('A','C')
+                AND m.USER_ID IN (1363,833,37985,114682,110487,107252,59940,64513,16522,119302,98217,98948,97441,93323,106080,80992)
+            )
         """)
         r = cur.fetchone()
         data['tp_unassigned'] = {'total': int(r['cnt'] or 0), 'old': int(r['old_cnt'] or 0), 'max_days': int(r['max_days'] or 0)}
