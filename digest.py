@@ -88,6 +88,7 @@ def collect_data():
             SELECT {GROUPS_SQL} as grp, COUNT(*) as cnt
             FROM b_tasks
             WHERE GROUP_ID IN (328, 342, 527, 353, 102) AND STATUS IN (1, 2, 3)
+            AND (GROUP_ID != 102 OR RESPONSIBLE_ID IN (1363,833,37985,114682,110487,107252,59940,64513,16522,119302,98217,98948,97441,93323,106080,80992))
             GROUP BY grp
         """)
         data['active_by_group'] = {r['grp']: r['cnt'] for r in cur.fetchall()}
@@ -101,6 +102,7 @@ def collect_data():
             FROM b_tasks
             WHERE GROUP_ID IN (328, 342, 527, 353, 102)
             AND STATUS IN (1, 2, 3) AND DEADLINE IS NOT NULL AND DEADLINE < NOW()
+            AND (GROUP_ID != 102 OR RESPONSIBLE_ID IN (1363,833,37985,114682,110487,107252,59940,64513,16522,119302,98217,98948,97441,93323,106080,80992))
             GROUP BY grp
         """)
         data['overdue_by_group'] = {r['grp']: {'over_7': int(r['over_7'] or 0), 'over_30': int(r['over_30'] or 0), 'over_90': int(r['over_90'] or 0)} for r in cur.fetchall()}
@@ -153,6 +155,7 @@ def collect_data():
             FROM b_tasks
             WHERE GROUP_ID IN (328, 342, 527, 353, 102)
             AND STATUS IN (1, 2, 3) AND DATEDIFF(NOW(), CREATED_DATE) > 30
+            AND (GROUP_ID != 102 OR RESPONSIBLE_ID IN (1363,833,37985,114682,110487,107252,59940,64513,16522,119302,98217,98948,97441,93323,106080,80992))
             GROUP BY grp
         """)
         data['long_tasks'] = {r['grp']: {'cnt': r['cnt'], 'max_days': int(r['max_days'] or 0)} for r in cur.fetchall()}
@@ -161,6 +164,7 @@ def collect_data():
         cur.execute(f"""
             SELECT {GROUPS_SQL} as grp, COUNT(DISTINCT RESPONSIBLE_ID) as people
             FROM b_tasks WHERE GROUP_ID IN (328, 342, 527, 353, 102) AND STATUS IN (1, 2, 3)
+            AND (GROUP_ID != 102 OR RESPONSIBLE_ID IN (1363,833,37985,114682,110487,107252,59940,64513,16522,119302,98217,98948,97441,93323,106080,80992))
             GROUP BY grp
         """)
         data['people_by_group'] = {r['grp']: r['people'] for r in cur.fetchall()}
