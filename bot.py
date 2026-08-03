@@ -1304,6 +1304,276 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+
+def _get_weekly_data(gids, tp_filter_ids, days):
+    """Собирает данные по группе за период days дней."""
+    from datetime import date, timedelta
+    from db import get_connection
+    today = date.today()
+    period_start = today - timedelta(days=days)
+    prev_start = today - timedelta(days=days*2)
+    ph = ','.join(['%s'] * len(gids))
+    tf = f" AND RESPONSIBLE_ID IN ({tp_filter_ids})" if tp_filter_ids else ""
+    tf_t = f" AND t.RESPONSIBLE_ID IN ({tp_filter_ids})" if tp_filter_ids else ""
+    conn = get_connection()
+    r = {}
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND CREATED_DATE >= %s{tf}", gids + [period_start])
+        r['new_tasks'] = cur.fetchone()['cnt']
+        cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3){tf}", gids)
+        r['active_now'] = cur.fetchone()['cnt']
+        cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3) AND CREATED_DATE < %s{tf}", gids + [period_start])
+        r['active_prev'] = cur.fetchone()['cnt']
+        cur.execute(f"SELECT COUNT(DISTINCT RESPONSIBLE_ID) as p FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3){tf}", gids)
+        r['people'] = max(cur.fetchone()['p'] or 1, 1)
+        cur.execute(f"""SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3)
+            AND DEADLINE IS NOT NULL AND DEADLINE < NOW() AND DATEDIFF(NOW(), CREATED_DATE) > 90{tf}""", gids)
+        r['overdue_90'] = cur.fetchone()['cnt']
+        cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS=5 AND CLOSED_DATE >= %s{tf}", gids + [period_start])
+        r['closed'] = cur.fetchone()['cnt']
+        cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS=5 AND CLOSED_DATE >= %s AND CLOSED_DATE < %s{tf}", gids + [prev_start, period_start])
+        r['closed_prev'] = cur.fetchone()['cnt']
+        cur.execute(f"""SELECT COALESCE(ROUND(SUM(e.MINUTES)/60.0,1),0) as hrs
+            FROM b_tasks_elapsed_time e JOIN b_tasks t ON t.ID=e.TASK_ID
+            WHERE t.GROUP_ID IN ({ph}) AND e.CREATED_DATE >= %s{tf_t}""", gids + [period_start])
+        r['hours'] = float(cur.fetchone()['hrs'] or 0)
+        cur.execute(f"""SELECT COUNT(*) as cnt FROM b_tasks_log tl JOIN b_tasks t ON t.ID=tl.TASK_ID
+            WHERE tl.FIELD='STAGE' AND tl.TO_VALUE IN ('Правки/Доработки','Возврат на доработку','На доработке')
+            AND tl.CREATED_DATE >= %s AND t.GROUP_ID IN ({ph})""", [period_start] + gids)
+        r['returns'] = cur.fetchone()['cnt']
+    conn.close()
+    return r
+
+
+def _health_signal(wip_per_person, overdue_90, throughput, returns):
+    score = 0
+    flags = []
+    if wip_per_person > 10:
+        score += 3; flags.append(f"WIP/чел {wip_per_person} >> нормы")
+    elif wip_per_person > 5:
+        score += 1; flags.append(f"WIP/чел {wip_per_person} > нормы")
+    if overdue_90 > 10:
+        score += 2; flags.append(f"просрочка >90д: {overdue_90}")
+    elif overdue_90 > 5:
+        score += 1
+    if throughput < 5:
+        score += 2; flags.append(f"низкий throughput: {throughput}")
+    elif throughput < 10:
+        score += 1
+    if returns > 5:
+        score += 1; flags.append(f"возвраты: {returns}")
+    if score == 0: return "🟢", flags
+    elif score <= 3: return "🟡", flags
+    else: return "🔴", flags
+
+
+def _build_weekly_text(days, context):
+    from datetime import date, timedelta
+    from db import TP_RETAIL, TP_SYSADMIN, TP_SYSADMIN_UZ
+    tp_all = TP_RETAIL + TP_SYSADMIN + TP_SYSADMIN_UZ
+    tp_str = ','.join(map(str, tp_all))
+    today = date.today()
+    period_start = today - timedelta(days=days)
+
+    GROUPS = [
+        ("🌐 WEB", "WEB", [328], None),
+        ("💼 1С", "1С", [342], None),
+        ("🏭 ПРОИЗВ.", "ПРОИЗВОДСТВО", [527, 353], None),
+        ("🛠 ТП", "ТП", [102], tp_str),
+    ]
+
+    period_label = {7: "неделя", 14: "2 недели", 30: "месяц"}.get(days, f"{days} дней")
+    lines = [f"📊 *Динамика за {period_label}* ({period_start.strftime('%d.%m')} — {today.strftime('%d.%m.%Y')})\n"]
+    group_signals = []
+    context.user_data["weekly_groups"] = {}
+
+    for grp_label, grp_key, gids, tp_filter_ids in GROUPS:
+        d = _get_weekly_data(gids, tp_filter_ids, days)
+        wip = round(d["active_now"] / d["people"], 1)
+        hrs_per = round(d["hours"] / d["people"], 1)
+        delta = d["active_now"] - d["active_prev"]
+        delta_str = f"↑+{delta}" if delta > 0 else (f"↓{delta}" if delta < 0 else "→")
+        t_delta = d["closed"] - d["closed_prev"]
+        t_str = f"↑+{t_delta}" if t_delta > 0 else (f"↓{t_delta}" if t_delta < 0 else "→")
+        signal, flags = _health_signal(wip, d["overdue_90"], d["closed"], d["returns"])
+        group_signals.append((grp_label, signal, flags))
+        context.user_data["weekly_groups"][grp_key] = {"gids": gids, "tp_str": tp_filter_ids, "days": days}
+
+        lines.append(f"{signal} {grp_label}")
+        lines.append(f"  Новых: *{d['new_tasks']}* | В работе: *{d['active_now']}* ({delta_str}) | WIP/чел: *{wip}*")
+        lines.append(f"  Закрыто: *{d['closed']}* ({t_str}) | Просрочка >90д: *{d['overdue_90']}*")
+        lines.append(f"  Часов/чел: *{hrs_per}ч* | Возвраты: *{d['returns']}*")
+        if flags:
+            lines.append(f"  ⚠️ _{', '.join(flags)}_")
+        lines.append("")
+
+    red = sum(1 for _, s, _ in group_signals if s == "🔴")
+    yellow = sum(1 for _, s, _ in group_signals if s == "🟡")
+    if red >= 2: overall = "🔴 Критично"
+    elif red == 1 or yellow >= 2: overall = "🟡 Требует внимания"
+    else: overall = "🟢 Хорошо"
+    lines.append(f"💊 *Здоровье команды: {overall}*")
+
+    context.user_data["weekly_days"] = days
+
+    # LLM анализ
+    try:
+        import os, requests as req
+        llm_prompt = f"""Ты ИТ-аналитик Markformelle. Данные о работе ИТ-отдела за {period_label}:
+
+{chr(10).join(lines)}
+
+Напиши краткий анализ (3-5 предложений) на русском:
+- главный риск недели
+- что идёт хорошо  
+- одна конкретная рекомендация руководству
+
+Без заголовков, только текст."""
+
+        resp = req.post(
+            os.getenv("TOGETHER_BASE_URL", "https://api.together.xyz/v1") + "/chat/completions",
+            headers={"Authorization": f"Bearer {os.getenv('TOGETHER_API_KEY')}", "Content-Type": "application/json"},
+            json={"model": "meta-llama/llama-3.3-70b-instruct", "messages": [{"role": "user", "content": llm_prompt}], "max_tokens": 300, "temperature": 0.5},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        ai_text = resp.json()['choices'][0]['message']['content']
+        lines.append(f"\\n🤖 *Анализ ИИ:*\\n_{ai_text}_")
+    except Exception:
+        pass
+
+    return "\\n".join(lines)
+
+
+async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_bitrix_user(update.effective_user.id)
+    if not user:
+        await update.message.reply_text("❌ Сначала авторизуйтесь через /start")
+        return
+    await update.message.reply_text("⏳ Формирую недельный отчёт...")
+    text = _build_weekly_text(7, context)
+    keyboard = [
+        [InlineKeyboardButton("📅 2 недели", callback_data="weekly_period_14"),
+         InlineKeyboardButton("📅 Месяц", callback_data="weekly_period_30")],
+        [InlineKeyboardButton("🌐 WEB", callback_data="weekly_group_WEB"),
+         InlineKeyboardButton("💼 1С", callback_data="weekly_group_1С")],
+        [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
+         InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
+    ]
+    if len(text) > 4000:
+        text = text[:4000] + "\n_...обрезано_"
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def weekly_period_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    days = int(query.data.replace("weekly_period_", ""))
+    await query.edit_message_text("⏳ Пересчитываю...")
+    text = _build_weekly_text(days, context)
+    keyboard = [
+        [InlineKeyboardButton("📅 Неделя", callback_data="weekly_period_7"),
+         InlineKeyboardButton("📅 2 недели", callback_data="weekly_period_14"),
+         InlineKeyboardButton("📅 Месяц", callback_data="weekly_period_30")],
+        [InlineKeyboardButton("🌐 WEB", callback_data="weekly_group_WEB"),
+         InlineKeyboardButton("💼 1С", callback_data="weekly_group_1С")],
+        [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
+         InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
+    ]
+    if len(text) > 4000:
+        text = text[:4000] + "\n_...обрезано_"
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def weekly_group_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    grp_key = query.data.replace("weekly_group_", "")
+    days = context.user_data.get("weekly_days", 7)
+    grp_info = context.user_data.get("weekly_groups", {}).get(grp_key)
+
+    if not grp_info:
+        await query.edit_message_text("❌ Данные устарели — запустите /weekly заново")
+        return
+
+    gids = grp_info["gids"]
+    tp_filter_ids = grp_info["tp_str"]
+    ph = ','.join(['%s'] * len(gids))
+    tf = f" AND t.RESPONSIBLE_ID IN ({tp_filter_ids})" if tp_filter_ids else ""
+
+    from datetime import date, timedelta
+    from db import get_connection
+    today = date.today()
+    period_start = today - timedelta(days=days)
+    week_end = today + timedelta(days=7)
+
+    conn = get_connection()
+    lines = [f"🔍 *{grp_key}* — детализация ({days} дн.)\n"]
+
+    with conn.cursor() as cur:
+        # Топ-5 по закрытым
+        cur.execute(f"""SELECT CONCAT(COALESCE(u.LAST_NAME,''),' ',COALESCE(u.NAME,'')) as name,
+            COUNT(*) as cnt FROM b_tasks t JOIN b_user u ON u.ID=t.RESPONSIBLE_ID
+            WHERE t.GROUP_ID IN ({ph}) AND t.STATUS=5 AND t.CLOSED_DATE >= %s{tf}
+            GROUP BY t.RESPONSIBLE_ID, u.LAST_NAME, u.NAME ORDER BY cnt DESC LIMIT 5""", gids + [period_start])
+        top5 = cur.fetchall()
+        if top5:
+            lines.append("🏆 *Топ-5 по закрытым:*")
+            for i, r in enumerate(top5, 1):
+                lines.append(f"  {i}. {r['name'].strip()} — {r['cnt']} задач")
+            lines.append("")
+
+        # Топ-3 долгих задачи
+        cur.execute(f"""SELECT t.ID as id, t.TITLE as title,
+            CONCAT(COALESCE(u.LAST_NAME,''),' ',COALESCE(u.NAME,'')) as name,
+            DATEDIFF(NOW(), t.CREATED_DATE) as days_in
+            FROM b_tasks t JOIN b_user u ON u.ID=t.RESPONSIBLE_ID
+            WHERE t.GROUP_ID IN ({ph}) AND t.STATUS IN (1,2,3){tf.replace('t.RESPONSIBLE_ID','t.RESPONSIBLE_ID')}
+            ORDER BY days_in DESC LIMIT 3""", gids)
+        long_tasks = cur.fetchall()
+        if long_tasks:
+            lines.append("⏰ *Топ-3 долгих задачи:*")
+            for r in long_tasks:
+                url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{r['id']}/"
+                lines.append(f"  • [{r['title'][:45]}]({url})\n    {r['name'].strip()} | {r['days_in']} дн.")
+            lines.append("")
+
+        # Возвраты по стадиям
+        cur.execute(f"""SELECT tl.TO_VALUE as stage, COUNT(*) as cnt
+            FROM b_tasks_log tl JOIN b_tasks t ON t.ID=tl.TASK_ID
+            WHERE tl.FIELD='STAGE' AND tl.TO_VALUE IN ('Правки/Доработки','Возврат на доработку','На доработке')
+            AND tl.CREATED_DATE >= %s AND t.GROUP_ID IN ({ph})
+            GROUP BY tl.TO_VALUE ORDER BY cnt DESC""", [period_start] + gids)
+        returns = cur.fetchall()
+        if returns:
+            lines.append("🔄 *Возвраты по стадиям:*")
+            for r in returns:
+                lines.append(f"  • {r['stage']} — {r['cnt']}")
+            lines.append("")
+
+        # Дедлайн на этой неделе
+        cur.execute(f"""SELECT COUNT(*) as cnt FROM b_tasks t
+            WHERE t.GROUP_ID IN ({ph}) AND t.STATUS IN (1,2,3)
+            AND t.DEADLINE >= %s AND t.DEADLINE <= %s{tf}""", gids + [today, week_end])
+        deadline_week = cur.fetchone()['cnt']
+        lines.append(f"📅 *Дедлайн на этой неделе:* {deadline_week} задач")
+
+    conn.close()
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n_...обрезано_"
+
+    keyboard = [[InlineKeyboardButton("🔙 Назад к сводке", callback_data=f"weekly_period_{days}")]]
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -1365,6 +1635,9 @@ def main():
     app.add_handler(CallbackQueryHandler(analytics_type_callback, pattern="^anal_type_"))
     app.add_handler(CallbackQueryHandler(analytics_back_callback, pattern="^anal_back$"))
     app.add_handler(CommandHandler("resetall", resetall))
+    app.add_handler(CommandHandler("weekly", weekly))
+    app.add_handler(CallbackQueryHandler(weekly_period_callback, pattern="^weekly_period_"))
+    app.add_handler(CallbackQueryHandler(weekly_group_callback, pattern="^weekly_group_"))
     app.add_handler(CallbackQueryHandler(analytics_returns_callback, pattern="^anal_returns_"))
     app.add_handler(CallbackQueryHandler(analytics_specialist_role, pattern="^anal_specialist$"))
     app.add_handler(CallbackQueryHandler(analytics_specialist_list, pattern="^spec_role_"))
