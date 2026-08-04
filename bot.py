@@ -15,7 +15,7 @@ os.environ.pop("all_proxy", None)
 os.environ["NO_PROXY"] = "*"
 
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, filters, ContextTypes
@@ -70,9 +70,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
+        start_keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("🚀 Начать")]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         await update.message.reply_text(
             "👋 Привет! Для начала нужно привязать твой аккаунт Битрикс24.\n\n"
-            "Введи свой корпоративный email:"
+            "Введи свой корпоративный email:",
+            reply_markup=start_keyboard
         )
         return REGISTER_EMAIL
     
@@ -129,11 +135,25 @@ async def register_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bitrix_name = context.user_data["bitrix_name"]
     register_user(update.effective_user.id, bitrix_id, bitrix_name)
 
+    first_name = bitrix_name.split()[0]
+    keyboard = [
+        [
+            InlineKeyboardButton("📋 Задачи", callback_data="menu_tasks"),
+            InlineKeyboardButton("📊 Аналитика", callback_data="menu_analytics"),
+        ],
+        [
+            InlineKeyboardButton("📈 Динамика недели", callback_data="menu_weekly"),
+            InlineKeyboardButton("👤 По специалисту", callback_data="menu_specialist"),
+        ],
+    ]
     await update.message.reply_text(
-        f"✅ Отлично, {bitrix_name}! Доступ открыт.\n\n"
-        "📋 /tasks — задачи по группам\n"
-        "📅 /calendar — встречи\n"
-        "➕ /add_meeting — создать встречу\n"
+        f"✅ Отлично, *{first_name}*! Доступ открыт.\n\nВыбери раздел:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await update.message.reply_text(
+        "👇",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
 
@@ -1664,9 +1684,35 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "tasks":
-        await tasks(update, context)
+        keyboard = [
+            [
+                InlineKeyboardButton("🌐 WEB", callback_data="group_WEB"),
+                InlineKeyboardButton("💼 1С", callback_data="group_1С"),
+            ],
+            [
+                InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="group_ПРОИЗВОДСТВО"),
+                InlineKeyboardButton("🛠 ТП", callback_data="group_ТП"),
+            ],
+            [InlineKeyboardButton("📋 Все", callback_data="group_ALL")],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="menu_back")],
+        ]
+        await query.edit_message_text("Выбери группу задач:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif action == "analytics":
-        await analytics(update, context)
+        keyboard = [
+            [
+                InlineKeyboardButton("🌐 WEB", callback_data="anal_WEB"),
+                InlineKeyboardButton("💼 1С", callback_data="anal_1С"),
+            ],
+            [
+                InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="anal_ПРОИЗВОДСТВО"),
+                InlineKeyboardButton("🛠 ТП", callback_data="anal_ТП"),
+            ],
+            [
+                InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
+            ],
+            [InlineKeyboardButton("🔙 Главное меню", callback_data="menu_back")],
+        ]
+        await query.edit_message_text("📊 Аналитика — выбери группу:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif action == "weekly":
         # Эмулируем вызов /weekly через callback
         text = _build_weekly_text(7, context)
