@@ -481,9 +481,8 @@ async def back_to_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🏭 ПРОИЗВОДСТВО", callback_data="group_ПРОИЗВОДСТВО"),
             InlineKeyboardButton("🛠 ТП", callback_data="group_ТП"),
         ],
-        [
-            InlineKeyboardButton("📋 Все", callback_data="group_ALL"),
-        ],
+        [InlineKeyboardButton("📋 Все", callback_data="group_ALL")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="menu_back")],
     ]
     await query.edit_message_text("Выбери группу задач:", reply_markup=InlineKeyboardMarkup(keyboard))
 async def analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -994,6 +993,7 @@ async def analytics_back_callback(update: Update, context: ContextTypes.DEFAULT_
         [
             InlineKeyboardButton("📋 Все", callback_data="anal_ALL"),
         ],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="menu_back")],
     ]
     await query.edit_message_text("📊 Аналитика — выбери группу:", reply_markup=InlineKeyboardMarkup(keyboard))  
 
