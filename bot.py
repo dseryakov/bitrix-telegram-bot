@@ -49,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     user = get_bitrix_user(telegram_id)
     if user:
-        first_name = user['name'].split()[1] if len(user['name'].split()) > 1 else user['name'].split()[0]
+        first_name = user['name'].split()[0]
         text = (
             f"👋 Привет, *{first_name}*!\n\n"
             "Выбери раздел:"
@@ -1505,6 +1505,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
          InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
         [InlineKeyboardButton("🔄 Обновить данные", callback_data="weekly_refresh_7")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu_back")],
     ]
     if len(text) > 4000:
         text = text[:4000] + "\n_...обрезано_"
@@ -1534,6 +1535,7 @@ async def weekly_period_callback(update: Update, context: ContextTypes.DEFAULT_T
         [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
          InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
         [InlineKeyboardButton(f"🔄 Обновить (кэш: {cached_at})", callback_data=f"weekly_refresh_{days}")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu_back")],
     ]
     if len(text) > 4000:
         text = text[:4000] + "\n_...обрезано_"
@@ -1634,6 +1636,32 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = query.data.replace("menu_", "")
+
+    if action == "back":
+        user = get_bitrix_user(query.from_user.id)
+        first_name = user['name'].split()[0] if user else "друг"
+        keyboard = [
+            [
+                InlineKeyboardButton("📋 Задачи", callback_data="menu_tasks"),
+                InlineKeyboardButton("📊 Аналитика", callback_data="menu_analytics"),
+            ],
+            [
+                InlineKeyboardButton("📈 Динамика недели", callback_data="menu_weekly"),
+                InlineKeyboardButton("👤 По специалисту", callback_data="menu_specialist"),
+            ],
+        ]
+        try:
+            await query.edit_message_text(
+                f"👋 Привет, *{first_name}*!\n\nВыбери раздел:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception:
+            await query.edit_message_text(
+                f"Выбери раздел:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        return
 
     if action == "tasks":
         await tasks(update, context)
