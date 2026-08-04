@@ -124,20 +124,91 @@ def get_group_tasks(group_ids: list):
     return result
 
 
-def format_group_message(group_name: str, tasks: dict) -> str:
-    """Форматирует сообщение для руководителя группы."""
+def get_group_dynamics(group_ids: list, tp_filter_ids: str = None) -> dict:
+    """Получает динамику группы для блока сравнения с прошлой неделей."""
+    from datetime import timedelta
+    from db import get_connection
+    ph = ','.join(['%s'] * len(group_ids))
+    tf = f" AND RESPONSIBLE_ID IN ({tp_filter_ids})" if tp_filter_ids else ""
+    tf_t = f" AND t.RESPONSIBLE_ID IN ({tp_filter_ids})" if tp_filter_ids else ""
+    week_ago = date.today() - timedelta(days=7)
+    two_weeks_ago = date.today() - timedelta(days=14)
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3){tf}", group_ids)
+            active_now = cur.fetchone()['cnt']
+            cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3) AND CREATED_DATE < %s{tf}", group_ids + [week_ago])
+            active_prev = cur.fetchone()['cnt']
+            cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS=5 AND CLOSED_DATE >= %s{tf}", group_ids + [week_ago])
+            closed_now = cur.fetchone()['cnt']
+            cur.execute(f"SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS=5 AND CLOSED_DATE >= %s AND CLOSED_DATE < %s{tf}", group_ids + [two_weeks_ago, week_ago])
+            closed_prev = cur.fetchone()['cnt']
+            cur.execute(f"""SELECT COUNT(*) as cnt FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3)
+                AND DEADLINE IS NOT NULL AND DEADLINE < NOW() AND DATEDIFF(NOW(), CREATED_DATE) > 90{tf}""", group_ids)
+            overdue_90_now = cur.fetchone()['cnt']
+            cur.execute(f"SELECT COUNT(DISTINCT RESPONSIBLE_ID) as p FROM b_tasks WHERE GROUP_ID IN ({ph}) AND STATUS IN (1,2,3){tf}", group_ids)
+            people = max(cur.fetchone()['p'] or 1, 1)
+        conn.close()
+        return {
+            'active_now': active_now, 'active_prev': active_prev,
+            'closed_now': closed_now, 'closed_prev': closed_prev,
+            'overdue_90': overdue_90_now, 'people': people,
+            'wip': round(active_now / people, 1),
+        }
+    except Exception as e:
+        print(f"Dynamics error: {e}")
+        return {}
+
+
+def format_group_message(group_name: str, tasks: dict, dynamics: dict = None) -> str:
+    """Форматирует сообщение для руководителя группы с динамикой."""
     today = date.today().strftime('%d.%m.%Y')
-    lines = [f"📋 *{group_name}* — задачи требующие внимания ({today})\n"]
+
+    lines = []
+
+    # Блок динамики если есть данные
+    if dynamics:
+        d = dynamics
+        delta_active = d['active_now'] - d['active_prev']
+        delta_closed = d['closed_now'] - d['closed_prev']
+        wip = d['wip']
+
+        active_signal = "🔴" if delta_active > 10 else ("🟡" if delta_active > 0 else "🟢")
+        closed_signal = "🟢" if delta_closed > 0 else ("🟡" if delta_closed == 0 else "🔴")
+        overdue_signal = "🔴" if d['overdue_90'] > 10 else ("🟡" if d['overdue_90'] > 5 else "🟢")
+        wip_signal = "🔴" if wip > 10 else ("🟡" if wip > 5 else "🟢")
+
+        # Общая оценка
+        red = sum(1 for s in [active_signal, closed_signal, overdue_signal, wip_signal] if s == "🔴")
+        yellow = sum(1 for s in [active_signal, closed_signal, overdue_signal, wip_signal] if s == "🟡")
+        overall = "🔴 Критично" if red >= 2 else ("🟡 Требует внимания" if red == 1 or yellow >= 2 else "🟢 Хорошо")
+        overall_signal = overall.split()[0]
+
+        d_active_str = f"↑+{delta_active}" if delta_active > 0 else (f"↓{delta_active}" if delta_active < 0 else "→")
+        d_closed_str = f"↑+{delta_closed}" if delta_closed > 0 else (f"↓{delta_closed}" if delta_closed < 0 else "→")
+
+        lines.append(f"{overall_signal} *{group_name}* — {today}")
+        lines.append(f"В работе: *{d['active_now']}* ({d_active_str}) | Закрыто: *{d['closed_now']}* ({d_closed_str}) | Задач/чел: *{wip}*")
+        lines.append("")
+        lines.append("📊 *Детали:*")
+        lines.append(f"{active_signal} Очередь задач: {d['active_now']} ({d_active_str} за неделю)")
+        lines.append(f"{closed_signal} Скорость закрытия: {d['closed_now']} задач ({d_closed_str})")
+        lines.append(f"{overdue_signal} Просрочка >90 дней: {d['overdue_90']}")
+        lines.append(f"{wip_signal} Задач на сотрудника: {wip} (норма 5)")
+        lines.append(f"💊 Оценка: {overall}")
+        lines.append("")
+    else:
+        lines.append(f"📋 *{group_name}* — задачи требующие внимания ({today})")
+        lines.append("")
 
     overdue = tasks['overdue']
     if overdue:
         lines.append(f"🔴 *Просроченные ({len(overdue)}):*")
         for t in overdue:
             url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{t['id']}/"
-            lines.append(
-                f"• [{t['title'][:50]}]({url})\n"
-                "  👤 " + (' '.join(t['responsible'].split()[:2])) + f" | {t['days']} дн. просрочки | ⏰ {t['deadline']}"
-            )
+            name = ' '.join(t['responsible'].split()[:2])
+            lines.append(f"• [{t['title'][:50]}]({url})\n  👤 {name} | {t['days']} дн. просрочки | ⏰ {t['deadline']}")
     else:
         lines.append("✅ *Просроченных задач нет*")
 
@@ -149,10 +220,8 @@ def format_group_message(group_name: str, tasks: dict) -> str:
         for t in long_tasks:
             url = f"https://mfportal.by/company/personal/user/0/tasks/task/view/{t['id']}/"
             stage_str = f" [{t['stage']}]" if t['stage'] else ""
-            lines.append(
-                f"• [{t['title'][:50]}]({url})\n"
-                "  👤 " + (' '.join(t['responsible'].split()[:2])) + f" | {t['days']} дн.{stage_str}"
-            )
+            name = ' '.join(t['responsible'].split()[:2])
+            lines.append(f"• [{t['title'][:50]}]({url})\n  👤 {name} | {t['days']} дн.{stage_str}")
     else:
         lines.append("✅ *Долгих задач нет*")
 
@@ -182,6 +251,18 @@ def send_telegram(chat_id: str, text: str):
 def run_notify():
     print(f"[{datetime.now()}] Запуск адресных уведомлений...")
 
+    from db import TP_RETAIL, TP_SYSADMIN, TP_SYSADMIN_UZ
+    tp_all = TP_RETAIL + TP_SYSADMIN + TP_SYSADMIN_UZ
+    tp_str = ','.join(map(str, tp_all))
+
+    # Маппинг группа → tp_filter для динамики
+    GROUP_TP_FILTER = {
+        "WEB": None,
+        "1С": None,
+        "ПРОИЗВОДСТВО": None,
+        "ТП": tp_str,
+    }
+
     tg_users = load_tg_users()  # {bitrix_id: telegram_chat_id}
     leads = get_group_leads()
 
@@ -207,7 +288,9 @@ def run_notify():
 
         print(f"  Формирую отчёт для {name} ({group_name})...")
         tasks = get_group_tasks(group_ids)
-        message = format_group_message(group_name, tasks)
+        tp_filter = GROUP_TP_FILTER.get(group_name)
+        dynamics = get_group_dynamics(group_ids, tp_filter)
+        message = format_group_message(group_name, tasks, dynamics)
 
         send_telegram(tg_chat_id, message)
         print(f"  ✅ Отправлено {name} (chat_id: {tg_chat_id}): {len(tasks['overdue'])} просроч., {len(tasks['long'])} долгих")

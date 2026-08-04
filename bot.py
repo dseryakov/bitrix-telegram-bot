@@ -1399,12 +1399,21 @@ def _build_weekly_text(days, context):
         group_signals.append((grp_label, signal, flags))
         context.user_data["weekly_groups"][grp_key] = {"gids": gids, "tp_str": tp_filter_ids, "days": days}
 
-        lines.append(f"{signal} {grp_label}")
-        lines.append(f"  Новых: *{d['new_tasks']}* | В работе: *{d['active_now']}* ({delta_str}) | WIP/чел: *{wip}*")
-        lines.append(f"  Закрыто: *{d['closed']}* ({t_str}) | Просрочка >90д: *{d['overdue_90']}*")
-        lines.append(f"  Часов/чел: *{hrs_per}ч* | Возвраты: *{d['returns']}*")
-        if flags:
-            lines.append(f"  ⚠️ _{', '.join(flags)}_")
+        # Оценки для каждого показателя
+        wip_signal = "🔴" if wip > 10 else ("🟡" if wip > 5 else "🟢")
+        active_signal = "🔴" if delta > 10 else ("🟡" if delta > 0 else "🟢")
+        closed_signal = "🟢" if t_delta > 0 else ("🟡" if t_delta == 0 else "🔴")
+        overdue_signal = "🔴" if d['overdue_90'] > 10 else ("🟡" if d['overdue_90'] > 5 else "🟢")
+
+        lines.append(f"{signal} {grp_label} — {today.strftime('%d.%m.%Y')}")
+        lines.append(f"В работе: *{d['active_now']}* ({delta_str}) | Закрыто: *{d['closed']}* ({t_str}) | Задач/чел: *{wip}*")
+        lines.append("")
+        lines.append("📊 Детали:")
+        lines.append(f"{active_signal} Очередь задач: {d['active_now']} ({delta_str} за период)")
+        lines.append(f"{closed_signal} Скорость закрытия: {d['closed']} задач ({t_str})")
+        lines.append(f"{overdue_signal} Просрочка >90 дней: {d['overdue_90']}")
+        lines.append(f"{wip_signal} Задач на сотрудника: {wip} (норма 5)")
+        lines.append(f"💊 Оценка: {signal}")
         lines.append("")
 
     red = sum(1 for _, s, _ in group_signals if s == "🔴")
@@ -1419,30 +1428,33 @@ def _build_weekly_text(days, context):
     # LLM анализ
     try:
         import os, requests as req
-        llm_prompt = f"""Ты ИТ-аналитик Markformelle. Данные о работе ИТ-отдела за {period_label}:
+        llm_prompt = f"""Ты аналитик ИТ-отдела Markformelle. Напиши 4-5 предложений на русском языке для руководства компании.
 
+Данные о работе ИТ-отдела за {period_label}:
 {chr(10).join(lines)}
 
-Напиши краткий анализ (3-5 предложений) на русском:
-- главный риск недели
-- что идёт хорошо  
-- одна конкретная рекомендация руководству
-
-Без заголовков, только текст."""
+Требования:
+- Не используй термины WIP, throughput — пиши: "задач на сотрудника", "скорость закрытия задач", "очередь задач"
+- Первое предложение: главная проблема с конкретными цифрами и названием отдела
+- Второе предложение: что улучшилось за период (если есть)
+- Третье предложение: конкретная рекомендация — кому и что сделать
+- Без заголовков, только текст"""
 
         resp = req.post(
             os.getenv("TOGETHER_BASE_URL", "https://api.together.xyz/v1") + "/chat/completions",
             headers={"Authorization": f"Bearer {os.getenv('TOGETHER_API_KEY')}", "Content-Type": "application/json"},
-            json={"model": "meta-llama/llama-3.3-70b-instruct", "messages": [{"role": "user", "content": llm_prompt}], "max_tokens": 300, "temperature": 0.5},
+            json={"model": "meta-llama/llama-3.3-70b-instruct", "messages": [{"role": "user", "content": llm_prompt}], "max_tokens": 350, "temperature": 0.5},
             timeout=30,
         )
         resp.raise_for_status()
         ai_text = resp.json()['choices'][0]['message']['content']
-        lines.append(f"\\n🤖 *Анализ ИИ:*\\n_{ai_text}_")
+        lines.append("")
+        lines.append("🤖 *Анализ ИИ:*")
+        lines.append(f"_{ai_text}_")
     except Exception:
         pass
 
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
