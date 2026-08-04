@@ -1379,9 +1379,19 @@ def _health_signal(wip_per_person, overdue_90, throughput, returns):
     else: return "🔴", flags
 
 
-def _build_weekly_text(days, context):
-    from datetime import date, timedelta
+def _build_weekly_text(days, context, force_refresh=False):
+    from datetime import date, timedelta, datetime
     from db import TP_RETAIL, TP_SYSADMIN, TP_SYSADMIN_UZ
+
+    # Проверяем кэш
+    cache_key = f"weekly_cache_{days}"
+    cache = context.user_data.get(cache_key)
+    if cache and not force_refresh:
+        # Обновляем только weekly_groups и weekly_days из кэша
+        context.user_data["weekly_groups"] = cache.get("weekly_groups", {})
+        context.user_data["weekly_days"] = days
+        return cache["text"]
+
     tp_all = TP_RETAIL + TP_SYSADMIN + TP_SYSADMIN_UZ
     tp_str = ','.join(map(str, tp_all))
     today = date.today()
@@ -1437,6 +1447,14 @@ def _build_weekly_text(days, context):
 
     context.user_data["weekly_days"] = days
 
+    # Сохраняем в кэш
+    final_text = "\n".join(lines)
+    context.user_data[f"weekly_cache_{days}"] = {
+        "text": final_text,
+        "weekly_groups": context.user_data.get("weekly_groups", {}),
+        "cached_at": today.strftime('%d.%m.%Y'),
+    }
+
     # LLM анализ
     try:
         import os, requests as req
@@ -1466,7 +1484,10 @@ def _build_weekly_text(days, context):
     except Exception:
         pass
 
-    return "\n".join(lines)
+    final_text = "\n".join(lines)
+    # Обновляем кэш с LLM анализом
+    context.user_data[f"weekly_cache_{days}"]["text"] = final_text
+    return final_text
 
 
 async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1475,7 +1496,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Сначала авторизуйтесь через /start")
         return
     await update.message.reply_text("⏳ Формирую недельный отчёт...")
-    text = _build_weekly_text(7, context)
+    text = _build_weekly_text(7, context, force_refresh=True)
     keyboard = [
         [InlineKeyboardButton("📅 2 недели", callback_data="weekly_period_14"),
          InlineKeyboardButton("📅 Месяц", callback_data="weekly_period_30")],
@@ -1483,6 +1504,7 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("💼 1С", callback_data="weekly_group_1С")],
         [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
          InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
+        [InlineKeyboardButton("🔄 Обновить данные", callback_data="weekly_refresh_7")],
     ]
     if len(text) > 4000:
         text = text[:4000] + "\n_...обрезано_"
@@ -1492,9 +1514,17 @@ async def weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def weekly_period_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    days = int(query.data.replace("weekly_period_", ""))
-    await query.edit_message_text("⏳ Пересчитываю...")
-    text = _build_weekly_text(days, context)
+
+    # Проверяем — обновление или смена периода
+    if query.data.startswith("weekly_refresh_"):
+        days = int(query.data.replace("weekly_refresh_", ""))
+        await query.edit_message_text("⏳ Обновляю данные...")
+        text = _build_weekly_text(days, context, force_refresh=True)
+    else:
+        days = int(query.data.replace("weekly_period_", ""))
+        text = _build_weekly_text(days, context, force_refresh=False)
+
+    cached_at = context.user_data.get(f"weekly_cache_{days}", {}).get("cached_at", "")
     keyboard = [
         [InlineKeyboardButton("📅 Неделя", callback_data="weekly_period_7"),
          InlineKeyboardButton("📅 2 недели", callback_data="weekly_period_14"),
@@ -1503,6 +1533,7 @@ async def weekly_period_callback(update: Update, context: ContextTypes.DEFAULT_T
          InlineKeyboardButton("💼 1С", callback_data="weekly_group_1С")],
         [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
          InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
+        [InlineKeyboardButton(f"🔄 Обновить (кэш: {cached_at})", callback_data=f"weekly_refresh_{days}")],
     ]
     if len(text) > 4000:
         text = text[:4000] + "\n_...обрезано_"
@@ -1694,7 +1725,7 @@ def main():
     app.add_handler(CommandHandler("resetall", resetall))
     app.add_handler(CommandHandler("weekly", weekly))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
-    app.add_handler(CallbackQueryHandler(weekly_period_callback, pattern="^weekly_period_"))
+    app.add_handler(CallbackQueryHandler(weekly_period_callback, pattern="^weekly_(period|refresh)_"))
     app.add_handler(CallbackQueryHandler(weekly_group_callback, pattern="^weekly_group_"))
     app.add_handler(CallbackQueryHandler(analytics_returns_callback, pattern="^anal_returns_"))
     app.add_handler(CallbackQueryHandler(analytics_specialist_role, pattern="^anal_specialist$"))
