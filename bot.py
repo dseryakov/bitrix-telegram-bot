@@ -49,14 +49,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     user = get_bitrix_user(telegram_id)
     if user:
+        first_name = user['name'].split()[1] if len(user['name'].split()) > 1 else user['name'].split()[0]
         text = (
-            f"👋 Привет, {user['name']}!\n\n"
-            "📋 /tasks — задачи по группам\n"
-            "📊 /analytics — анализ по специалистам\n"
-            "📅 /calendar — встречи\n"
-            "➕ /add_meeting — создать встречу\n"
+            f"👋 Привет, *{first_name}*!\n\n"
+            "Выбери раздел:"
         )
-        await update.message.reply_text(text)
+        keyboard = [
+            [
+                InlineKeyboardButton("📋 Задачи", callback_data="menu_tasks"),
+                InlineKeyboardButton("📊 Аналитика", callback_data="menu_analytics"),
+            ],
+            [
+                InlineKeyboardButton("📈 Динамика недели", callback_data="menu_weekly"),
+                InlineKeyboardButton("👤 По специалисту", callback_data="menu_specialist"),
+            ],
+        ]
+        await update.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     else:
         await update.message.reply_text(
             "👋 Привет! Для начала нужно привязать твой аккаунт Битрикс24.\n\n"
@@ -1586,6 +1598,39 @@ async def weekly_group_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопок главного меню."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.replace("menu_", "")
+
+    if action == "tasks":
+        await tasks(update, context)
+    elif action == "analytics":
+        await analytics(update, context)
+    elif action == "weekly":
+        # Эмулируем вызов /weekly через callback
+        text = _build_weekly_text(7, context)
+        keyboard = [
+            [InlineKeyboardButton("📅 2 недели", callback_data="weekly_period_14"),
+             InlineKeyboardButton("📅 Месяц", callback_data="weekly_period_30")],
+            [InlineKeyboardButton("🌐 WEB", callback_data="weekly_group_WEB"),
+             InlineKeyboardButton("💼 1С", callback_data="weekly_group_1С")],
+            [InlineKeyboardButton("🏭 ПРОИЗВ.", callback_data="weekly_group_ПРОИЗВОДСТВО"),
+             InlineKeyboardButton("🛠 ТП", callback_data="weekly_group_ТП")],
+        ]
+        if len(text) > 4000:
+            text = text[:4000] + "\n_...обрезано_"
+        try:
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception:
+            await query.edit_message_text(text.replace("*","").replace("_",""), reply_markup=InlineKeyboardMarkup(keyboard))
+    elif action == "specialist":
+        # Переходим к аналитике → по специалисту
+        keyboard = [[InlineKeyboardButton("👤 По специалисту", callback_data="anal_specialist")]]
+        await query.edit_message_text("Выбери группу для анализа специалиста:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 def main():
     import httpx
     from telegram.request import HTTPXRequest
@@ -1594,10 +1639,10 @@ def main():
     from telegram import BotCommand
     async def set_commands(app):
         await app.bot.set_my_commands([
+            BotCommand("start", "Главное меню"),
             BotCommand("tasks", "Задачи по группам"),
-            BotCommand("calendar", "Встречи"),
             BotCommand("analytics", "Аналитика задач"),
-            BotCommand("add_meeting", "Создать встречу"),
+            BotCommand("weekly", "Динамика недели"),
         ])
     async def on_startup(app):
         from analytics import load_user_cache
@@ -1606,10 +1651,10 @@ def main():
         load_user_cache()
         print("✅ Кэш загружен")
         await app.bot.set_my_commands([
+            BotCommand("start", "Главное меню"),
             BotCommand("tasks", "Задачи по группам"),
-            BotCommand("calendar", "Встречи"),
-            BotCommand("add_meeting", "Создать встречу"),
             BotCommand("analytics", "Аналитика задач"),
+            BotCommand("weekly", "Динамика недели"),
         ])
     
     app.post_init = on_startup
@@ -1648,6 +1693,7 @@ def main():
     app.add_handler(CallbackQueryHandler(analytics_back_callback, pattern="^anal_back$"))
     app.add_handler(CommandHandler("resetall", resetall))
     app.add_handler(CommandHandler("weekly", weekly))
+    app.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
     app.add_handler(CallbackQueryHandler(weekly_period_callback, pattern="^weekly_period_"))
     app.add_handler(CallbackQueryHandler(weekly_group_callback, pattern="^weekly_group_"))
     app.add_handler(CallbackQueryHandler(analytics_returns_callback, pattern="^anal_returns_"))
