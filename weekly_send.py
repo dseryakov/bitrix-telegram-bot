@@ -78,9 +78,9 @@ def get_weekly_data(gids, tp_filter_ids, days):
 def health_signal(wip, overdue_90, throughput, returns):
     score = 0
     flags = []
-    if wip > 10:
+    if wip > 20:
         score += 3; flags.append(f"задач/чел {wip} >> нормы")
-    elif wip > 5:
+    elif wip > 10:
         score += 1; flags.append(f"задач/чел {wip} > нормы")
     if overdue_90 > 10:
         score += 2; flags.append(f"просрочка >90д: {overdue_90}")
@@ -95,6 +95,20 @@ def health_signal(wip, overdue_90, throughput, returns):
     if score == 0: return "🟢", flags
     elif score <= 3: return "🟡", flags
     else: return "🔴", flags
+
+
+def send_to_bitrix(text: str):
+    try:
+        import os, requests as req
+        from dotenv import load_dotenv
+        load_dotenv()
+        clean = text.replace("*","").replace("_","")
+        r = req.post(os.getenv("BITRIX_WEBHOOK_URL") + "im.message.add.json",
+            json={"DIALOG_ID": "chat645085", "MESSAGE": clean},
+            proxies={"http": None, "https": None}, timeout=15)
+        print("Bitrix:", r.status_code)
+    except Exception as e:
+        print(f"Bitrix error: {e}")
 
 
 def run_weekly_send():
@@ -127,7 +141,7 @@ def run_weekly_send():
         signal, flags = health_signal(wip, d['overdue_90'], d['closed'], d['returns'])
         group_signals.append(signal)
 
-        wip_s = "🔴" if wip > 10 else ("🟡" if wip > 5 else "🟢")
+        wip_s = "🔴" if wip > 20 else ("🟡" if wip > 10 else "🟢")
         active_s = "🔴" if delta > 10 else ("🟡" if delta > 0 else "🟢")
         closed_s = "🟢" if t_delta > 0 else ("🟡" if t_delta == 0 else "🔴")
         overdue_s = "🔴" if d['overdue_90'] > 10 else ("🟡" if d['overdue_90'] > 5 else "🟢")
@@ -139,7 +153,7 @@ def run_weekly_send():
         lines.append(f"{active_s} Очередь задач: {d['active_now']} ({delta_str} за неделю)")
         lines.append(f"{closed_s} Скорость закрытия: {d['closed']} задач ({t_str})")
         lines.append(f"{overdue_s} Просрочка >90 дней: {d['overdue_90']}")
-        lines.append(f"{wip_s} Задач на сотрудника: {wip} (норма 5)")
+        lines.append(f"{wip_s} Задач на сотрудника: {wip} (норма 10)")
         lines.append(f"💊 Оценка: {signal}")
         if flags:
             lines.append(f"⚠️ _{', '.join(flags)}_")
@@ -154,8 +168,23 @@ def run_weekly_send():
 
     text = "\n".join(lines)
     send_telegram(DIGEST_TELEGRAM_CHAT_ID, text)
+    send_to_bitrix(text)
     print(f"[{date.today()}] Weekly отправлен в {DIGEST_TELEGRAM_CHAT_ID}")
 
 
 if __name__ == "__main__":
     run_weekly_send()
+
+
+def send_to_bitrix(text: str):
+    try:
+        import os, requests as req
+        from dotenv import load_dotenv
+        load_dotenv()
+        clean = text.replace('*','').replace('_','')
+        r = req.post(os.getenv('BITRIX_WEBHOOK_URL') + 'im.message.add.json',
+            json={'DIALOG_ID': 'chat645085', 'MESSAGE': clean},
+            proxies={'http': None, 'https': None}, timeout=15)
+        print('Bitrix:', r.status_code)
+    except Exception as e:
+        print(f'Bitrix error: {e}')

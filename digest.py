@@ -333,6 +333,9 @@ def call_llm(data_text: str) -> str:
 
 
 def send_telegram(chat_id: str, text: str):
+    if not text:
+        print(f'send_telegram: пустой текст, пропускаем')
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     # Убираем markdown таблицы — Telegram их не рендерит
     chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
